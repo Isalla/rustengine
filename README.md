@@ -75,6 +75,8 @@ Headless builds without window libraries:
 
 ## Milestones
 
+The living checklist with every sub-item: [docs/roadmap.md](docs/roadmap.md).
+
 - **M0** — repo, workspace, core data model and glTF pipeline ✅
 - **M1** — `re-render` + `re-wgpu`: render scenes with glTF textures (offscreen) ✅
 - **M2** — `re-platform`: windows, input, delta time, surface rendering ✅

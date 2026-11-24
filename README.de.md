@@ -74,6 +74,8 @@ Headless-Builds ohne Fenster-Bibliotheken:
 
 ## Meilensteine
 
+Die lebende Checkliste mit jedem Unterpunkt: [docs/roadmap.de.md](docs/roadmap.de.md).
+
 - **M0** — Repo, Workspace, Kern-Datenmodell und glTF-Pipeline ✅
 - **M1** — `re-render` + `re-wgpu`: Szenen mit glTF-Texturen rendern (Offscreen) ✅
 - **M2** — `re-platform`: Fenster, Eingabe, Delta-Time, Surface-Rendering ✅
