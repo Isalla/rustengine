@@ -1,7 +1,7 @@
 //! # re-render — GPU-Renderer der Rust Engine (RE)
 //!
 //! Meilenstein M1: realzeitfaehiger Renderer, der die Szenen aus
-//! [`re_core`] mit den Materialien und Albedo-Texturen aus [`re_io`]
+//! [`re_core`] mit den Materialien und Albedo-Texturen aus `re-io`
 //! (glTF 2.0 inkl. `baseColorTexture`) darstellt.
 //!
 //! Dieses Crate enthaelt nur plattformneutrale Konzepte:

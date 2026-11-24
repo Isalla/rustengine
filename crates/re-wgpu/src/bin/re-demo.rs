@@ -124,7 +124,7 @@ pub fn gather(
     let mut mx = Vec3::splat(f32::MIN);
 
     let mut push = |mesh: &'static re_core::mesh::Mesh, material: &'static Material, world: Mat4| {
-        batches.push(DrawBatch { mesh, material, world, sprite: None });
+        batches.push(DrawBatch { mesh, material, world, sprite: None, cell: None });
         for p in &mesh.positions {
             let q = world.transform_point3(Vec3::from_array(*p));
             mn = mn.min(q);

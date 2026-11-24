@@ -48,6 +48,11 @@ pub struct DrawBatch<'a> {
     pub world: Mat4,
     /// Billboard-Ausschnitt; None = normale Mesh-Material-Pipeline.
     pub sprite: Option<Sprite>,
+    /// Stream-Zellen-Id: ist sie gesetzt, zeichnet das Backend den
+    /// Batch nur, wenn die Zelle ueber `GfxBackend::upload_cell`
+    /// bereits in die GPU-Residenz uebernommen wurde (M3c-Handoff).
+    /// None = klassische Route ueber das Mesh-Handle.
+    pub cell: Option<u64>,
 }
 
 /// Lebenszyklus pro Frame: `init` einmal, dann `resize` bei Bedarf,
@@ -71,6 +76,20 @@ pub trait GfxBackend: Send {
     fn upload_texture(&mut self, _id: u64, _rgba: &[u8], _width: u32, _height: u32) -> Result<(), GfxError> {
         Ok(())
     }
+
+    /// Stream-Zelle in die GPU-Residenz uebernehmen (M3c-Handoff):
+    /// ab jetzt zeichnen Batches mit `cell == Some(id)`. Der Aufruf
+    /// kommt aus der Upload-Pipeline, nie aus dem Update-Thread.
+    /// Backends ohne GPU-Residenz (Null) duellen den No-op und
+    /// zeichnen Zell-Batches einfach mit.
+    fn upload_cell(&mut self, _id: u64, _mesh: &Mesh) -> Result<(), GfxError> {
+        Ok(())
+    }
+
+    /// GPU-Ressourcen einer Zelle freigeben. Kommt fruehestens
+    /// nachdem der Handoff die Schonfrist ablaufen liess — niemals
+    /// waehrend ein laufender Frame die Zelle noch zeichnet.
+    fn release_cell(&mut self, _id: u64) {}
 
     /// Frame ausliefern; No-op fuer headless Backends.
     fn present(&mut self) -> Result<(), GfxError> {
@@ -150,12 +169,13 @@ mod tests {
             16.0 / 9.0,
         );
         let batches = [
-            DrawBatch { mesh: &mesh, material: &mat, world: Mat4::IDENTITY, sprite: None },
+            DrawBatch { mesh: &mesh, material: &mat, world: Mat4::IDENTITY, sprite: None, cell: None },
             DrawBatch {
                 mesh: &mesh,
                 material: &mat,
                 world: Mat4::from_translation(glam::Vec3::X),
                 sprite: Some(Sprite { texture: 7, rect: [0, 0, 64, 64] }),
+                cell: None,
             },
         ];
         b.render(&cam, &batches).unwrap();

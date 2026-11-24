@@ -19,7 +19,7 @@ pub enum Interpolation {
     Cubic,
 }
 
-/// Animated value: 3 components for Translation/Scale, quaternion [x,y,z,w] for Rotation.
+/// Animated value: 3 components for Translation/Scale, quaternion `[x,y,z,w]` for Rotation.
 #[derive(Copy, Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum KeyValue {
     Vec3([f32; 3]),

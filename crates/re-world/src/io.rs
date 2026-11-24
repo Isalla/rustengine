@@ -14,7 +14,7 @@
 //! * [`CellCodec`] — wie aus Bytes eine Payload wird (z. B. Binär →
 //!   Szenen-Chunks oder Upload-Befehle für die GPU).
 //!
-//! Die Budget-Buchführung rechnet mit der **RoheBlocgröße** (Länge der
+//! Die Budget-Buchführung rechnet mit der **Rohblockgröße** (Länge der
 //! Store-Bytes) — der Codec ändert daran nichts, sonst wäre das Budget
 //! nicht mehr ehrlich.
 //!

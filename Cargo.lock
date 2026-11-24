@@ -1591,6 +1591,7 @@ dependencies = [
  "re-core",
  "re-platform",
  "re-render",
+ "re-world",
  "wgpu",
  "winit",
 ]

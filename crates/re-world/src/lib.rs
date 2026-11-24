@@ -27,9 +27,15 @@
 //! * **Pooling statt Entladen:** verlassene Zellen bleiben als
 //!   Resident-LRU liegen, bis das Budget sie verdrängt; Sichtwechsel
 //!   ändern nur Prioritäten, nie die Szene.
+//! * **GPU-Handoff als eigene Naht:** [`handoff::CellHandoff`] puffert
+//!   frische Payloads in einer Triple-Buffer-Pipeline und übergibt sie
+//!   über das Trait [`handoff::GpuUpload`] der GPU — pro Frame nur ein
+//!   Byte-Kontingent, nie blockierend. Der Kern bleibt kopflos: Der
+//!   Scheduler zählt nur Frames, der echte Upload steckt im Backend.
 
 pub mod clipmap;
 pub mod grid;
+pub mod handoff;
 pub mod io;
 pub mod partition;
 pub mod stream;
@@ -37,6 +43,7 @@ pub mod tier;
 
 pub use clipmap::{ClipDiff, Clipmap, ClipmapConfig};
 pub use grid::CellKey;
+pub use handoff::{CellHandoff, GpuUpload, HandoffConfig, HandoffStats};
 pub use io::{AsyncSource, BlockStore, CellCodec, FileStore};
 pub use partition::{Instance, PartitionConfig, PartitionDelta, TierChange, WorldPartition};
 pub use stream::{

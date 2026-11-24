@@ -14,6 +14,7 @@ window = ["dep:winit", "dep:re-platform"]
 [dependencies]
 re-core.workspace = true
 re-render.workspace = true
+re-world.workspace = true
 anyhow.workspace = true
 glam.workspace = true
 wgpu = "30"
@@ -24,3 +25,9 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 [[bin]]
 name = "re-demo"
 path = "src/bin/re-demo.rs"
+
+# M3c-Demo: Welt-Streaming (FileStore → Async-IO → Streamer → Handoff)
+# durchs wgpu-Backend, ohne Projektdatei — die Welt entsteht per Formel.
+[[bin]]
+name = "stream-demo"
+path = "src/bin/stream-demo.rs"

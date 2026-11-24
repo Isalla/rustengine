@@ -170,6 +170,10 @@ struct Inner {
     /// TODO(M1c): Key durch stabile Asset-IDs ersetzen; Zeiger-Keys sind
     /// nur für den Offscreen-Demo-Pfad okay.
     mesh_cache: HashMap<usize, MeshGpu>,
+    /// Stream-Zellen in GPU-Residenz (M3c-Handoff): explicit vergebene
+    /// 64-Bit-Ids → Buffer. `upload_cell` legt an, `release_cell`
+    /// nimmt weg; Batches mit `cell`-Id zeichnen nur, was hier liegt.
+    cell_cache: HashMap<u64, MeshGpu>,
     tex_cache: HashMap<String, (wgpu::Texture, wgpu::TextureView)>,
     /// Billboard-Sheets unter frei gewählter ID (Upload vom Aufrufer).
     sheet_cache: HashMap<u64, (wgpu::Texture, wgpu::TextureView, u32, u32)>,
@@ -423,6 +427,7 @@ impl WgpuBackend {
             pipe_opaque,
             pipe_blend,
             mesh_cache: HashMap::new(),
+            cell_cache: HashMap::new(),
             tex_cache: HashMap::new(),
             sheet_cache: HashMap::new(),
         };
@@ -565,6 +570,13 @@ impl Inner {
         if self.mesh_cache.contains_key(&key) {
             return;
         }
+        let gpu = self.upload_mesh_gpu(mesh);
+        self.mesh_cache.insert(key, gpu);
+    }
+
+    /// GPU-Buffer (Vertex + Index) fuer ein Mesh anlegen und fuellen —
+    /// geteilter Kern von `ensure_mesh` und `upload_cell`.
+    fn upload_mesh_gpu(&mut self, mesh: &Mesh) -> MeshGpu {
         let mut verts = Vec::with_capacity(mesh.positions.len());
         for i in 0..mesh.positions.len() {
             verts.push(Vtx {
@@ -605,7 +617,7 @@ impl Inner {
             gpu.n_indices = idx.len() as u32;
             gpu.index = Some(b);
         }
-        self.mesh_cache.insert(key, gpu);
+        gpu
     }
 
     fn ensure_texture(&mut self, path: &str) -> Option<wgpu::TextureView> {
@@ -796,6 +808,28 @@ impl GfxBackend for WgpuBackend {
         Ok(())
     }
 
+    /// Stream-Zelle in die GPU-Residenz (M3c-Handoff): Buffer anlegen,
+    /// ab jetzt zeichnen Batches mit `cell == Some(id)`. Doppelte
+    /// Anmeldung wird ignoriert — die Pipeline liefert nur einmal.
+    fn upload_cell(&mut self, id: u64, mesh: &Mesh) -> Result<(), GfxError> {
+        let inner = self
+            .inner
+            .as_mut()
+            .ok_or_else(|| GfxError::Device("init nicht ausgeführt".into()))?;
+        if !inner.cell_cache.contains_key(&id) {
+            let gpu = inner.upload_mesh_gpu(mesh);
+            inner.cell_cache.insert(id, gpu);
+        }
+        Ok(())
+    }
+
+    /// GPU-Ressourcen einer Zelle freigeben (Schonfrist ist vorbei).
+    fn release_cell(&mut self, id: u64) {
+        if let Some(inner) = self.inner.as_mut() {
+            inner.cell_cache.remove(&id);
+        }
+    }
+
     fn render(&mut self, camera: &Camera, batches: &[DrawBatch]) -> Result<(), GfxError> {
         let inner = self
             .inner
@@ -818,10 +852,21 @@ impl GfxBackend for WgpuBackend {
                 if transparent != pass_kind || b.mesh.positions.is_empty() {
                     continue;
                 }
-                inner.ensure_mesh(b.mesh);
-                let key = (b.mesh as *const Mesh) as usize;
-                let Some(mg) = inner.mesh_cache.get(&key) else {
-                    continue;
+                // Zell-Batches zeichnen aus der GPU-Residenz (M3c):
+                // fehlt die Zelle, wird uebersprungen, nie nachgeladen.
+                let mg = match b.cell {
+                    Some(id) => match inner.cell_cache.get(&id) {
+                        Some(mg) => mg,
+                        None => continue,
+                    },
+                    None => {
+                        inner.ensure_mesh(b.mesh);
+                        let key = (b.mesh as *const Mesh) as usize;
+                        match inner.mesh_cache.get(&key) {
+                            Some(mg) => mg,
+                            None => continue,
+                        }
+                    }
                 };
                 let (Some(vbuf), ibuf) = (mg.vertex.clone(), mg.index.clone()) else {
                     continue;
