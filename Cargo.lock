@@ -1596,6 +1596,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "re-world"
+version = "0.1.0"
+dependencies = [
+ "glam",
+ "re-ecs",
+]
+
+[[package]]
 name = "redox_syscall"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
