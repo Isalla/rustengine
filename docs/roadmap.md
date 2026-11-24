@@ -17,6 +17,9 @@ honest state of repair. ✅ done and test-covered · 🟡 partially built ·
 * world partition: clipmap streaming, quality tiers T0..T4, byte
   budget, pooling — deterministically testable without a GPU
   (`re-world`, incl. async IO worker pool reading cell files)
+* cells move into VRAM asynchronously and are released after a grace
+  period — the `stream-demo` fly-over exercises the whole chain
+  (`re-world::handoff`, `re-wgpu`)
 
 ## M0 — Repo & core data model ✅
 
@@ -53,11 +56,16 @@ honest state of repair. ✅ done and test-covered · 🟡 partially built ·
 - [x] **M3c** Async IO pipeline: worker-thread pool behind `CellSource`,
       file-backed block store, cancel-safe, never blocks the caller
       (`re-world::io`)
-- [ ] **M3c** GPU handoff: payload → staging buffer → VRAM, triple
-      buffering so render and update never wait for upload
+- [x] **M3c** GPU handoff: triple-buffered `CellHandoff` with per-frame
+      byte quota, retire grace, deferred release; `upload_cell`/
+      `release_cell` in the backend traits, cell residency in `re-wgpu`
+      — demonstrated end-to-end by `stream-demo` (fly-over of a
+      formula world streamed through the real GPU pipeline)
 - [ ] **M3d** HLOD: baked far-field summary meshes at the clipmap rim
 - [ ] **M3e** First-person handoff: control transfer mid-flight without
       scene rebuild
+- [ ] IO telemetry: measured load latency/throughput drives tier
+      hysteresis and dwell adaptively (slow disk → degrade earlier)
 - [ ] MCP tools: agent-facing capability bindings for streaming and
       scene queries (builds on the `re-agent` registry scaffold)
 
@@ -106,6 +114,55 @@ honest state of repair. ✅ done and test-covered · 🟡 partially built ·
 - [ ] NDA SDK backends docked to the public traits (private repos)
 - [ ] Certification helpers, publishing pipeline
 
+## M11 — AI-native editor: UE5 breadth, plugin open ⬜
+
+*The editor of this engine is built for two kinds of users from day
+one: the human at the viewport and the agent at the registry. The
+target is the functional breadth of the UE5 editor — landscape,
+sequencer, VFX, audio, visual scripting, profiling — realized as
+plugins over one capability registry ([ki-integration](ki-integration.md)),
+so that every window a human can open is a tool the AI can call, and
+one sentence can drive what used to take a hundred clicks.*
+
+**Foundations**
+
+- [ ] Plugin architecture: engine & editor features ship as plugins
+      against a stable extension API (panels, importers, ECS systems,
+      render passes, registry tools); dynamic loading, versioned,
+      sandboxed third-party plugins opt-in (native `.so` or Wasm)
+- [ ] Double addressability rule: no editor feature ships without a
+      capability-registry tool; the UI is a client of the same tools
+      (undo-safe, batchable by the agent)
+- [ ] Scripting layer: embedded scripting (e.g. Lua or Rust hot-load)
+      for game logic and editor automation, also exposed as tools
+
+**Editor breadth (each item = UI panel + registry tools + plugin)**
+
+- [ ] Level editor: transform gizmos, snapping, modular kit assembly
+- [ ] Landscape & scatter: sculpting, paint layers, foliage/procedural
+      generation (PCG-style graph, deterministic seeds)
+- [ ] Material editor: node graph compiling to WGSL variants
+- [ ] Sequencer: tracks for camera, animation, audio, FX, properties —
+      timeline editable by hand or from a text description
+- [ ] VFX editor over `re-vfx` graphs; audio editor over `re-audio`
+      events; navigation & AI tools (navmesh, behavior graphs)
+- [ ] Profiler & frame debugger reading the render/GPU telemetry
+
+**AI content pipelines (providers behind traits, results baked as
+normal assets — the simulation core stays deterministic)**
+
+- [ ] Text → cutscene: one sentence becomes storyboard, shot list,
+      camera keys, blocking and edits on the sequencer; reviewable,
+      re-editable by hand, renderable via the path-tracing bake
+- [ ] AI sound: SFX and music generation wired into the sound-event
+      system (prompt → asset → placed on the timeline or in-game)
+- [ ] AI voices: runtime NPC dialogue via LLM providers with budget &
+      safety layer, TTS for delivery, lip-sync baked to animation
+- [ ] Assistant in the editor: direct in-process agent (Ollama,
+      llama.cpp, API) plus the MCP export — same registry, both doors
+- [ ] Generation telemetry: cost/latency accounting per tool call so
+      an agent run can be capped and audited
+
 ## Wiki — documentation in three layers ⬜
 
 - [ ] rustdoc on GitHub Pages, rebuilt on every push
@@ -121,8 +178,10 @@ MMO. The RTS is the first test project; shooter and MMO follow.*
 
 - [x] Data side of the flight: tiers + streaming + pooling never
       interrupt (M3a/M3b)
-- [x] Real file IO behind the same trait (M3c, in progress)
-- [ ] GPU side of the flight (M3c upload, M3d HLOD)
+- [x] Real file IO behind the same trait (M3c)
+- [x] GPU handoff of the flight: triple buffering, cell residency,
+      deferred release (`re-world::handoff`, `re-wgpu`)
+- [ ] Far-field HLOD at the clipmap rim (M3d)
 - [ ] Camera & timeline layer ([cinema](cinema.md))
 - [ ] Control handoff (M3e)
 - [ ] First playable: RTS vertical slice exercising the full round trip

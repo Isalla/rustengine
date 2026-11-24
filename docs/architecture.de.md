@@ -131,6 +131,27 @@ einen Rust-Renderer gebaut:
    noch einige Sekunden reserviert (Eviction-Verzögerung) — der
    Rückflug kostet keinen IO.
 
+**Speicher-Anforderungen.** Jede Zelle ist eine kleine Datei
+(`l{level}_x{x}_y{y}.bin`), das Streaming liest also viele kleine,
+spitze Zugriffe — entscheidend sind IOPS und Latenz, nicht
+sequenzieller Durchsatz. Richtwerte für eine volle Clipmap-Bestückung
+(hunderte residente Zellen, schnelle Flüge erzeugen hunderte
+Kleinzugriffe pro Minute):
+
+| Medium | Urteil |
+| --- | --- |
+| NVMe-SSD | Ziel — Vollspeed-Flug hält jede Stufe warm |
+| SATA-SSD | Minimum — Streaming läuft dauerhaft, feine Stufen haken kurz bei Maximalforderung |
+| Drehplatte | läuft mit Abstrichen — Budget und Tier-Hysterese halten das Grobe länger; der Render-Loop blockiert trotzdem nie |
+
+Die Engine verlangt kein bestimmtes Laufwerk: Die IO-Pipeline ist voll
+asynchron (`re-world::io`), und alles Langsame wird zuerst
+Detail-Armut, nie ein Ruckler oder ein Ladebildschirm. Vorgesehen sind
+darauf IO-Telemetrie — gemessene Lade-Latenz und Durchsatz treiben
+Tier-Hysterese und Verweilzeit adaptiv, damit eine langsame Platte
+früh abwertet, statt spät Zellen zu verlieren (siehe
+[roadmap](roadmap.de.md), M3).
+
 ## 6. ECS
 
 * Archetyp-basierte ECS (`re-ecs`, M3): Komponenten als einfache

@@ -17,6 +17,9 @@ mit ehrlichem Haken-Stand. ✅ fertig und testabgedeckt · 🟡 teilweise gebaut
 * World-Partition: Clipmap-Streaming, Quality-Tiers T0..T4, Byte-Budget,
   Pooling — ohne GPU deterministisch testbar (`re-world`, inkl.
   asynchronem IO-Thread-Pool, der Zelldateien von der Platte lädt)
+* Zellen wandern asynchron in die VRAM und werden verzögert wieder
+  freigegeben — Überflug-Demo `stream-demo` zeigt die ganze Kette
+  (`re-world::handoff`, `re-wgpu`)
 
 ## M0 — Repo & Kern-Datenmodell ✅
 
@@ -54,12 +57,17 @@ mit ehrlichem Haken-Stand. ✅ fertig und testabgedeckt · 🟡 teilweise gebaut
 - [x] **M3c** Asynchrone IO-Pipeline: Worker-Thread-Pool hinter
       `CellSource`, Datei-Blockstore, abbruchfest, blockiert den
       Aufrufer nie (`re-world::io`)
-- [ ] **M3c** GPU-Handoff: Payload → Staging-Buffer → VRAM,
-      Triple-Buffering, damit Render- und Update-Thread nie auf einen
-      Upload warten
+- [x] **M3c** GPU-Handoff: Triple-gepufferter `CellHandoff` mit
+      Byte-Kontingent pro Frame, Schonfrist beim Retire, verzögerter
+      Freigabe; `upload_cell`/`release_cell` in den Backend-Traits,
+      Zell-Residenz in `re-wgpu` — demonstriert von `stream-demo`
+      (Überflug einer Formel-Welt durch die echte GPU-Pipeline)
 - [ ] **M3d** HLOD: vorgebackene Fernfeld-Meshes am Clipmap-Rand
 - [ ] **M3e** Ego-Übergabe: Steuerungsübergabe mitten im Flug ohne
       Szenen-Neuaufbau
+- [ ] IO-Telemetrie: gemessene Lade-Latenz und Durchsatz treiben
+      Tier-Hysterese und Verweilzeit adaptiv (langsame Platte →
+      frühere Abwertung)
 - [ ] MCP-Werkzeuge: Agenten-Zugriff auf Streaming und Szenen-Abfragen
       (auf Basis der Capability-Registry aus `re-agent`)
 
@@ -108,6 +116,59 @@ mit ehrlichem Haken-Stand. ✅ fertig und testabgedeckt · 🟡 teilweise gebaut
 - [ ] NDA-SDK-Backends an die offenen Traits andocken (private Repos)
 - [ ] Zertifizierungs-Helfer, Veröffentlichungs-Pipeline
 
+## M11 — KI-nativer Editor: UE5-Breite, Plugin-Offenheit ⬜
+
+*Der Editor dieser Engine ist von Tag eins für zwei Arten von Nutzern
+gebaut: den Menschen am Viewport und die Agentin am Registry. Ziel ist
+die funktionale Breite des UE5-Editors — Landscape, Sequencer, VFX,
+Audio, visuelle Skripte, Profiling — realisiert als Plugins auf einer
+einzigen Capability-Registry ([ki-integration](ki-integration.de.md)):
+Jedes Fenster, das ein Mensch öffnen kann, ist ein Werkzeug, das die KI
+aufrufen kann — und ein Satz ersetzt hundert Klicks.*
+
+**Fundament**
+
+- [ ] Plugin-Architektur: Engine- und Editor-Funktionen erscheinen als
+      Plugins auf einer stabilen Erweiterungs-API (Panels, Importer,
+      ECS-Systeme, Render-Pässe, Registry-Werkzeuge); dynamisches Laden,
+      versioniert, fremde Plugins sandboxed (natives `.so` oder Wasm)
+- [ ] Regel der doppelten Adressierbarkeit: keine Editor-Funktion ohne
+      Registry-Werkzeug; die UI ist Kunde derselben Werkzeuge
+      (undo-sicher, von der Agentin stapelbar)
+- [ ] Skripting-Ebene: eingebettete Skriptsprache (z. B. Lua oder
+      Rust-Hot-Load) für Spiellogik und Editor-Automatisierung, ebenso
+      als Werkzeuge exponiert
+
+**Editor-Breite (je Punkt: UI-Panel + Registry-Werkzeuge + Plugin)**
+
+- [ ] Level-Editor: Transform-Gizmos, Snapping, modulare Baukasten-
+      montage
+- [ ] Landscape & Scatter: Sculpting, Farblayer, Vegetation/PCG-artige
+      Graphen mit deterministischen Seeds
+- [ ] Material-Editor: Node-Graph, kompiliert zu WGSL-Varianten
+- [ ] Sequencer: Spuren für Kamera, Animation, Audio, FX, Eigenschaften —
+      Timeline von Hand oder aus einer Textbeschreibung editierbar
+- [ ] VFX-Editor auf `re-vfx`-Graphen; Audio-Editor auf `re-audio`-
+      Events; Navigations- & KI-Werkzeuge (Navmesh, Verhaltensgraphen)
+- [ ] Profiler & Frame-Debugger auf der Render-/GPU-Telemetrie
+
+**KI-Inhaltspipelines (Provider hinter Traits, Ergebnisse werden
+normale Assets — der Simulationskern bleibt deterministisch)**
+
+- [ ] Text → Cutscene: aus einem Satz werden Storyboard, Shot-Liste,
+      Kamera-Keys, Blocking und Schnitte im Sequencer; nachlesbar, von
+      Hand nacheditierbar, über den Pfadtracer-Bake renderbar
+- [ ] KI-Sound: Generierung von Effekten und Musik, an das Schall-
+      ereignissystem angeschlossen (Prompt → Asset → Timeline oder
+      Spiel)
+- [ ] KI-Stimmen: NPC-Dialog zur Laufzeit über LLM-Provider mit
+      Budget- und Sicherheitsebene, TTS für die Stimme, Lip-Sync als
+      Animation gebacken
+- [ ] Assistent im Editor: direkter In-Process-Agent (Ollama,
+      llama.cpp, API) plus MCP-Export — dieselbe Registry, beide Türen
+- [ ] Generierungs-Telemetrie: Kosten-/Latenz-Buchführung pro
+      Werkzeugaufruf, damit ein Agenten-Lauf gedeckelt und prüfbar ist
+
 ## Wiki — Doku in drei Stufen ⬜
 
 - [ ] Rustdoc auf GitHub Pages, automatisch bei jedem Push
@@ -123,8 +184,10 @@ ist das erste Testprojekt; Shooter und MMO folgen.*
 
 - [x] Datenseite des Flugs: Tiers + Streaming + Pooling unterbrechen
       nie (M3a/M3b)
-- [x] Echtes Datei-IO hinter demselben Trait (M3c, läuft gerade)
-- [ ] GPU-Seite des Flugs (M3c-Upload, M3d-HLOD)
+- [x] Echtes Datei-IO hinter demselben Trait (M3c)
+- [x] GPU-Handoff des Flugs: Triple-Buffering, Zell-Residenz, verzögerte
+      Freigabe (`re-world::handoff`, `re-wgpu`)
+- [ ] Fernfeld-HLOD am Clipmap-Rand (M3d)
 - [ ] Kamera- & Timeline-Layer ([cinema.de](cinema.de.md))
 - [ ] Steuerungs-Übergabe (M3e)
 - [ ] Erster spielbarer Rundflug: RTS-Vertikalschnitt durch alles

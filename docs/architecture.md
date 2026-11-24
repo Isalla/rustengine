@@ -126,6 +126,25 @@ renderer:
    reused; resources stay reserved for a few seconds after leaving a
    zone (eviction delay) — the flight back costs no IO.
 
+**Storage requirements.** Every cell is one small file
+(`l{level}_x{x}_y{y}.bin`), so streaming reads are small and random —
+what matters is IOPS and latency, not sequential throughput. Guidance
+for a full clipmap loadout (hundreds of resident cells, fast flights
+trigger hundreds of small reads per minute):
+
+| Medium | Verdict |
+| --- | --- |
+| NVMe SSD | target — full-speed flight keeps every tier warm |
+| SATA SSD | minimum — sustained streaming works, fine tiers may lag briefly under maximal demand |
+| spinning disk | runs degraded — budget and tier hysteresis hold coarse detail longer; the render loop still never blocks |
+
+The engine never requires a specific disk: the IO pipeline is fully
+async (`re-world::io`) and everything slow first becomes
+less detail, never a stutter or a loading screen. Planned on top of
+that: IO telemetry — measured load latency and throughput drive tier
+hysteresis and dwell adaptively, so a slow disk degrades early instead
+of dropping cells late (see [roadmap](roadmap.md), M3).
+
 ## 6. ECS
 
 * Archetype-based ECS (`re-ecs`, M3): components as plain SoA storage,
