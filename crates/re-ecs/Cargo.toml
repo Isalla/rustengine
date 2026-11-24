@@ -1,0 +1,8 @@
+[package]
+name = "re-ecs"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Entity-Component-System: Welt, Komponenten-Speicher und Schedule — die Laufzeit-Welt der RE-Engine."
+
+[dependencies]

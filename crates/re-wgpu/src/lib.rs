@@ -1,0 +1,991 @@
+//! # re-wgpu — Referenz-Backend für `re_render::GfxBackend`
+//!
+//! Öffentlicher Standard-Renderer: Vulkan (Linux), DX11/DX12 (Windows),
+//! Metal (macOS) und WebGPU (wasm32) laufen über **ein** wgpu-HAL —
+//! DX-Versionen werden nie selbst implementiert, naga übersetzt WGSL.
+//!
+//! M1-Stand: Offscreen-Rendering (Ziel-Textur + Readback zu PNG), damit
+//! der Renderer auf dem headless Pi prüfbar ist und in der CI läuft.
+//! M2-Stand: mit Feature `window` zusätzlich Fenster-Rendering — die App
+//! reicht den winit-Fenster-Handle via [`GfxBackend::set_window_source`]
+//! durch, das Backend erzeugt daraus eine Surface und konfiguriert einen
+//! Swapchain. Ohne Feature bleibt das Crate headless baubar (Pi/CI).
+//!
+//! Shader: `shader.wgsl` — Lambert + Albedo-Textur oder Basisfarbe,
+//! Transparenz über eine eigene Blend-Pipeline. Culling bleibt in M1
+//! aus (Windings aus glTF/Primitives sind gemischt); M1b aktiviert es
+//! wieder, sobald die Windings-Regel dokumentiert ist.
+
+use std::collections::HashMap;
+use std::future::Future;
+use std::pin::pin;
+use std::task::{Context, Poll, Wake, Waker};
+
+use re_core::mesh::Mesh;
+use re_render::{Camera, DrawBatch, GfxBackend, GfxError};
+
+const SHADER: &str = include_str!("../shader.wgsl");
+const COPY_ROW_ALIGN: u32 = 256;
+/// Lichtrichtung wie im ISO-Baker (iso.rs), damit Bakes und Echtzeitbild matchen.
+const LIGHT_DIR: [f32; 3] = [0.45, 0.82, 0.35];
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct CamUni {
+    view_proj: [[f32; 4]; 4],
+    light_dir_time: [f32; 4],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct BatchUni {
+    world: [[f32; 4]; 4],
+    base_color: [f32; 4],
+    /// .x = 1 → Textur sampeln; .y = 1 → Billboard (unlit, aus Sheet).
+    /// Absicht: nur 16-Byte-Felder, damit Rust-Layout und WGSL-Uniform-
+    /// Layout (vec3-align=16!) identisch sind.
+    has_texture: [u32; 4],
+    /// normalisiertes UV-Rechteck (u0, v0, du, dv) für Sheet-Ausschnitte.
+    uv_rect: [f32; 4],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct Vtx {
+    pos: [f32; 3],
+    nrm: [f32; 3],
+    uv: [f32; 2],
+}
+
+/// Bytes eines #[repr(C)]-POD-Werts (bewusst ohne bytemuck — hält den
+/// Abhängigkeitsbaum klein; alle Structs hier sind Copy + repr(C)).
+fn pod_bytes<T>(v: &T) -> &[u8] {
+    unsafe { std::slice::from_raw_parts(v as *const T as *const u8, std::mem::size_of::<T>()) }
+}
+
+/// Bytes eines dichten POD-Vektors (Vtx/u32 — alle repr(C), keine Padding-Lücken).
+fn pod_vec_bytes<T: Copy>(v: &[T]) -> &[u8] {
+    unsafe {
+        std::slice::from_raw_parts(v.as_ptr() as *const u8, v.len() * std::mem::size_of::<T>())
+    }
+}
+
+const VERTEX_ATTRS: [wgpu::VertexAttribute; 3] = [
+    wgpu::VertexAttribute {
+        format: wgpu::VertexFormat::Float32x3,
+        offset: 0,
+        shader_location: 0,
+    },
+    wgpu::VertexAttribute {
+        format: wgpu::VertexFormat::Float32x3,
+        offset: 12,
+        shader_location: 1,
+    },
+    wgpu::VertexAttribute {
+        format: wgpu::VertexFormat::Float32x2,
+        offset: 24,
+        shader_location: 2,
+    },
+];
+
+fn mat4(m: glam::Mat4) -> [[f32; 4]; 4] {
+    m.to_cols_array_2d()
+}
+
+/// wgpu v30 liefert `impl Future` für Adapter/Device-Request. Ohne
+/// Async-Runtime im API-Vertrag des Traits: kleiner Spin-poll-Blocker
+/// (die Requests sind nach wenigen Polls fertig, kein Langzeit-Blocker).
+fn block_on<F: Future>(future: F) -> F::Output {
+    struct NoopWake;
+    impl Wake for NoopWake {
+        fn wake(self: std::sync::Arc<Self>) {}
+    }
+    let waker = Waker::from(std::sync::Arc::new(NoopWake));
+    let mut cx = Context::from_waker(&waker);
+    let mut future = pin!(future);
+    loop {
+        match future.as_mut().poll(&mut cx) {
+            Poll::Ready(v) => return v,
+            Poll::Pending => std::thread::yield_now(),
+        }
+    }
+}
+
+/// Fenster-Handle, das die Surface-Erzeugung überleben darf: hält das
+/// `Arc<Window>` und delegiert die raw-window-handle-Traits darauf.
+/// wgpu box't das Ziel in `SurfaceTarget::DisplayAndWindow` und der
+/// Surface-Handle bleibt gültig, solange die Surface lebt — deshalb hier
+/// ein owned Arc und keinborrowed Referenz-Handle.
+#[cfg(feature = "window")]
+#[derive(Clone)]
+struct WindowSource(std::sync::Arc<winit::window::Window>);
+
+#[cfg(feature = "window")]
+impl wgpu::rwh::HasWindowHandle for WindowSource {
+    fn window_handle(&self) -> Result<wgpu::rwh::WindowHandle<'_>, wgpu::rwh::HandleError> {
+        self.0.window_handle()
+    }
+}
+
+#[cfg(feature = "window")]
+impl wgpu::rwh::HasDisplayHandle for WindowSource {
+    fn display_handle(&self) -> Result<wgpu::rwh::DisplayHandle<'_>, wgpu::rwh::HandleError> {
+        self.0.display_handle()
+    }
+}
+
+#[derive(Default)]
+struct MeshGpu {
+    vertex: Option<wgpu::Buffer>,
+    index: Option<wgpu::Buffer>,
+    n_vertices: u32,
+    n_indices: u32,
+}
+
+struct Inner {
+    device: wgpu::Device,
+    queue: wgpu::Queue,
+    size: (u32, u32),
+    /// Bleibt alive, damit Surface/Adapter intern gültige Referenzen behalten.
+    #[allow(dead_code)]
+    instance: wgpu::Instance,
+    /// Format des Farbziels: Surface-Format (Fenster) oder Rgba8UnormSrgb (Offscreen).
+    format: wgpu::TextureFormat,
+    /// Fenster-Surface; None = Offscreen-Ziel-Textur.
+    surface: Option<wgpu::Surface<'static>>,
+    surface_cfg: Option<wgpu::SurfaceConfiguration>,
+    #[allow(dead_code)] // bleibt alive, solange color_view referenziert wird (nur Offscreen echtes Ziel)
+    color: wgpu::Texture,
+    color_view: wgpu::TextureView,
+    #[allow(dead_code)] // dito für depth_view
+    depth: wgpu::Texture,
+    depth_view: wgpu::TextureView,
+    sampler: wgpu::Sampler,
+    white_view: wgpu::TextureView,
+    cam_buf: wgpu::Buffer,
+    g1: wgpu::BindGroupLayout,
+    cam_bind: wgpu::BindGroup,
+    pipe_opaque: wgpu::RenderPipeline,
+    pipe_blend: wgpu::RenderPipeline,
+    /// TODO(M1c): Key durch stabile Asset-IDs ersetzen; Zeiger-Keys sind
+    /// nur für den Offscreen-Demo-Pfad okay.
+    mesh_cache: HashMap<usize, MeshGpu>,
+    tex_cache: HashMap<String, (wgpu::Texture, wgpu::TextureView)>,
+    /// Billboard-Sheets unter frei gewählter ID (Upload vom Aufrufer).
+    sheet_cache: HashMap<u64, (wgpu::Texture, wgpu::TextureView, u32, u32)>,
+}
+
+/// Für den Render-Pass vorbereitete Draw-Ressourcen (alle Handles owned).
+struct Prepared {
+    blend: bool,
+    vbuf: wgpu::Buffer,
+    ibuf: Option<wgpu::Buffer>,
+    n_vertices: u32,
+    n_indices: u32,
+    bind: wgpu::BindGroup,
+}
+
+/// wgpu-Backend — erst `init()`, dann pro Frame `render()`; `readback_rgba`
+/// holt das Ergebnis als RGBA8 (PNG-Export/Tests).
+#[derive(Default)]
+pub struct WgpuBackend {
+    inner: Option<Inner>,
+    frames: u64,
+    /// Vor `init` gesetztes Fenster-Ziel (Feature `window`).
+    #[cfg(feature = "window")]
+    window_src: Option<std::sync::Arc<winit::window::Window>>,
+}
+
+impl WgpuBackend {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Fenster-Modus: Handle des `re-platform`-Fensters übernehmen
+    /// (`desktop::WindowHandleSource`, als `Arc<dyn Any>` durchgereicht).
+    /// Muss vor [`GfxBackend::init`] aufgerufen werden.
+    #[cfg(feature = "window")]
+    pub fn set_window_source(
+        &mut self,
+        src: std::sync::Arc<dyn std::any::Any + Send + Sync>,
+    ) -> Result<(), GfxError> {
+        if self.inner.is_some() {
+            return Err(GfxError::Surface("set_window_source nur vor init()".into()));
+        }
+        let window = src
+            .downcast::<winit::window::Window>()
+            .map_err(|_| GfxError::Surface("fremder Window-Handle-Typ".into()))?;
+        self.window_src = Some(window);
+        Ok(())
+    }
+
+    /// true, wenn im Fenster-Modus gerendert wird (kein Readback möglich).
+    pub fn is_windowed(&self) -> bool {
+        self.inner.as_ref().is_some_and(|i| i.surface.is_some())
+    }
+
+    pub fn rendered_frames(&self) -> u64 {
+        self.frames
+    }
+
+    /// Hochgeladene Texturen: Albedo-Dateien + Billboard-Sheets.
+    pub fn textures_loaded(&self) -> usize {
+        self.inner
+            .as_ref()
+            .map(|i| i.tex_cache.len() + i.sheet_cache.len())
+            .unwrap_or(0)
+    }
+
+    // ---------- Setup ----------
+
+    fn init_inner(&mut self) -> Result<(), GfxError> {
+        let instance = wgpu::Instance::default();
+
+        // Fenster-Ziel (Feature `window`): Surface aus dem winit-Handle.
+        #[cfg(feature = "window")]
+        let surface = match &self.window_src {
+            Some(window) => Some(
+                instance
+                    .create_surface(WindowSource(window.clone()))
+                    .map_err(|e| GfxError::Surface(e.to_string()))?,
+            ),
+            None => None,
+        };
+        #[cfg(not(feature = "window"))]
+        let surface: Option<wgpu::Surface<'static>> = None;
+
+        let adapter = block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::HighPerformance,
+            force_fallback_adapter: false,
+            compatible_surface: surface.as_ref(),
+            apply_limit_buckets: false,
+        }))
+        .map_err(|e| GfxError::Device(format!("adapter: {e}")))?;
+
+        // downlevel_defaults = lowest common denominator (Vulkan…WebGPU).
+        let (device, queue) = block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+            label: Some("re-device"),
+            required_features: wgpu::Features::empty(),
+            required_limits: wgpu::Limits::downlevel_defaults(),
+            ..Default::default()
+        }))
+        .map_err(|e| GfxError::Device(e.to_string()))?;
+
+        let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("re-shader"),
+            source: wgpu::ShaderSource::Wgsl(SHADER.into()),
+        });
+
+        let g0 = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("g0-cam"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            }],
+        });
+        let g1 = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("g1-batch"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+        });
+
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("linear-clamp"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
+        });
+
+        // 1×1-Weiß als Fallback für Materialien ohne Textur.
+        let white = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("white"),
+            size: wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &white,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &[255, 255, 255, 255],
+            wgpu::TexelCopyBufferLayout::default(),
+            wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+        );
+        let white_view = white.create_view(&wgpu::TextureViewDescriptor::default());
+
+        let cam_buf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("cam-uni"),
+            size: std::mem::size_of::<CamUni>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let cam_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("cam-bind"),
+            layout: &g0,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: cam_buf.as_entire_binding(),
+            }],
+        });
+
+        // Swapchain für die Fenster-Surface: ihr Format bestimmt die
+        // Pipelines. Erstkonfiguration mit der physischen Fenstergröße;
+        // der Created-Event ruft anschließend ohnehin `resize` auf.
+        let (surface_cfg, format) = match &surface {
+            Some(s) => {
+                #[cfg(feature = "window")]
+                let (cw, ch) = {
+                    let w = self.window_src.as_ref().expect("Surface nur mit window_src");
+                    let sz = w.inner_size();
+                    (sz.width.max(1), sz.height.max(1))
+                };
+                #[cfg(not(feature = "window"))]
+                let (cw, ch) = (1280u32, 720u32);
+                let cfg = s
+                    .get_default_config(&adapter, cw, ch)
+                    .ok_or_else(|| GfxError::Surface("Surface-Konfiguration nicht verfügbar".into()))?;
+                s.configure(&device, &cfg);
+                let f = cfg.format;
+                (Some(cfg), f)
+            }
+            None => (None, wgpu::TextureFormat::Rgba8UnormSrgb),
+        };
+
+        let pipe_opaque = make_pipeline(&device, &module, &g0, &g1, false, format);
+        let pipe_blend = make_pipeline(&device, &module, &g0, &g1, true, format);
+
+        let mut inner = Inner {
+            device,
+            queue,
+            size: (0, 0),
+            instance,
+            format,
+            surface,
+            surface_cfg,
+            color: white.clone(),
+            color_view: white_view.clone(),
+            depth: white,
+            depth_view: white_view.clone(),
+            sampler,
+            white_view,
+            cam_buf,
+            g1,
+            cam_bind,
+            pipe_opaque,
+            pipe_blend,
+            mesh_cache: HashMap::new(),
+            tex_cache: HashMap::new(),
+            sheet_cache: HashMap::new(),
+        };
+        inner.make_target(1280, 720);
+        self.inner = Some(inner);
+        Ok(())
+    }
+
+    // ---------- Bild ----------
+
+    /// Inhalt des letzten Frames als RGBA8 (Zeilen ohne Copy-Padding).
+    /// Nur im Offscreen-Modus — das Fenster präsentiert direkt auf den
+    /// Bildschirm, dort gibt es kein auslesbares Ziel.
+    pub fn readback_rgba(&mut self) -> Result<(u32, u32, Vec<u8>), GfxError> {
+        let inner = self
+            .inner
+            .as_ref()
+            .ok_or_else(|| GfxError::Device("init nicht ausgeführt".into()))?;
+        if inner.surface.is_some() {
+            return Err(GfxError::Surface("Readback im Fenstermodus nicht verfügbar".into()));
+        }
+        let (w, h) = inner.size;
+        let unpadded = w * 4;
+        let padded = unpadded.div_ceil(COPY_ROW_ALIGN) * COPY_ROW_ALIGN;
+        let staging = inner.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("readback"),
+            size: u64::from(padded) * u64::from(h),
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        let mut enc = inner.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("re-readback"),
+        });
+        enc.copy_texture_to_buffer(
+            wgpu::TexelCopyTextureInfo {
+                texture: &inner.color,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::TexelCopyBufferInfo {
+                buffer: &staging,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(padded),
+                    rows_per_image: Some(h),
+                },
+            },
+            wgpu::Extent3d {
+                width: w,
+                height: h,
+                depth_or_array_layers: 1,
+            },
+        );
+        inner.queue.submit([enc.finish()]);
+
+        let slice = staging.slice(..);
+        let (tx, rx) = std::sync::mpsc::channel();
+        slice.map_async(wgpu::MapMode::Read, move |r| {
+            let _ = tx.send(r);
+        });
+        inner
+            .device
+            .poll(wgpu::PollType::wait_indefinitely())
+            .map_err(|e| GfxError::Device(format!("poll: {e}")))?;
+        rx.recv()
+            .map_err(|_| GfxError::Device("map-Kanal abgerissen".into()))?
+            .map_err(|e| GfxError::Device(format!("map: {e}")))?;
+        let view = slice
+            .get_mapped_range()
+            .map_err(|e| GfxError::Device(format!("mapped range: {e}")))?;
+        let mut out = Vec::with_capacity((w * h * 4) as usize);
+        for row in view.chunks_exact(padded as usize) {
+            out.extend_from_slice(&row[..unpadded as usize]);
+        }
+        drop(view);
+        staging.unmap();
+        Ok((w, h, out))
+    }
+}
+
+impl Inner {
+    /// Zeichenziele (neu) anlegen. Die Depth-Textur gibt es in beiden
+    /// Modi; die Farb-Ziel-Textur nur headless — im Fenstermodus liefert
+    /// die Surface pro Frame ihre eigenen Texturen.
+    fn make_target(&mut self, w: u32, h: u32) {
+        let size = wgpu::Extent3d {
+            width: w.max(1),
+            height: h.max(1),
+            depth_or_array_layers: 1,
+        };
+        if self.surface.is_none() {
+            let color = self.device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("target"),
+                size,
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: self.format,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+                view_formats: &[],
+            });
+            self.color_view = color.create_view(&wgpu::TextureViewDescriptor::default());
+            self.color = color;
+        }
+        let depth = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("depth"),
+            size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Depth32Float,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        });
+        self.depth_view = depth.create_view(&wgpu::TextureViewDescriptor::default());
+        self.depth = depth;
+        self.size = (w.max(1), h.max(1));
+    }
+
+    /// Swapchain neu konfigurieren + Depth anpassen. `configure` panickt,
+    /// wenn noch eine Surface-Textur lebt — die hält render() nur lokal
+    /// und hat sie vor diesem Aufruf längst gepresent.
+    fn resize(&mut self, w: u32, h: u32) {
+        let (w, h) = (w.max(1), h.max(1));
+        if let (Some(surface), Some(cfg)) = (&self.surface, self.surface_cfg.as_mut()) {
+            if cfg.width != w || cfg.height != h {
+                cfg.width = w;
+                cfg.height = h;
+                surface.configure(&self.device, cfg);
+            }
+        }
+        self.make_target(w, h);
+    }
+}
+
+impl Inner {
+    fn ensure_mesh(&mut self, mesh: &Mesh) {
+        let key = (mesh as *const Mesh) as usize;
+        if self.mesh_cache.contains_key(&key) {
+            return;
+        }
+        let mut verts = Vec::with_capacity(mesh.positions.len());
+        for i in 0..mesh.positions.len() {
+            verts.push(Vtx {
+                pos: mesh.positions[i],
+                nrm: mesh
+                    .normals
+                    .as_ref()
+                    .and_then(|ns| ns.get(i).copied())
+                    .unwrap_or([0.0, 1.0, 0.0]),
+                uv: mesh
+                    .uvs
+                    .as_ref()
+                    .and_then(|us| us.get(i).copied())
+                    .unwrap_or([0.0, 0.0]),
+            });
+        }
+        let vertex = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("mesh-vert"),
+            size: (verts.len() * std::mem::size_of::<Vtx>()) as u64,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        self.queue.write_buffer(&vertex, 0, pod_vec_bytes(&verts));
+        let mut gpu = MeshGpu {
+            vertex: Some(vertex),
+            index: None,
+            n_vertices: mesh.positions.len() as u32,
+            n_indices: 0,
+        };
+        if let Some(idx) = mesh.indices.as_ref().filter(|v| !v.is_empty()) {
+            let b = self.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("mesh-idx"),
+                size: (idx.len() * 4) as u64,
+                usage: wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            self.queue.write_buffer(&b, 0, pod_vec_bytes(idx));
+            gpu.n_indices = idx.len() as u32;
+            gpu.index = Some(b);
+        }
+        self.mesh_cache.insert(key, gpu);
+    }
+
+    fn ensure_texture(&mut self, path: &str) -> Option<wgpu::TextureView> {
+        if let Some((_, v)) = self.tex_cache.get(path) {
+            return Some(v.clone());
+        }
+        let img = image::ImageReader::open(path)
+            .ok()?
+            .with_guessed_format()
+            .ok()?
+            .decode()
+            .ok()?
+            .to_rgba8();
+        let (w, h) = img.dimensions();
+        let tex = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("albedo"),
+            size: wgpu::Extent3d {
+                width: w,
+                height: h,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        self.queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &tex,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            img.as_raw(),
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(w * 4),
+                rows_per_image: None,
+            },
+            wgpu::Extent3d {
+                width: w,
+                height: h,
+                depth_or_array_layers: 1,
+            },
+        );
+        let view = tex.create_view(&wgpu::TextureViewDescriptor::default());
+        self.tex_cache
+            .insert(path.to_string(), (tex, view.clone()));
+        Some(view)
+    }
+}
+
+fn make_pipeline(
+    device: &wgpu::Device,
+    module: &wgpu::ShaderModule,
+    g0: &wgpu::BindGroupLayout,
+    g1: &wgpu::BindGroupLayout,
+    blend: bool,
+    format: wgpu::TextureFormat,
+) -> wgpu::RenderPipeline {
+    let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("re-layout"),
+        bind_group_layouts: &[Some(g0), Some(g1)],
+        immediate_size: 0,
+    });
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some(if blend { "re-blend" } else { "re-opaque" }),
+        layout: Some(&layout),
+        vertex: wgpu::VertexState {
+            module,
+            entry_point: Some("vs"),
+            compilation_options: Default::default(),
+            buffers: &[Some(wgpu::VertexBufferLayout {
+                array_stride: std::mem::size_of::<Vtx>() as wgpu::BufferAddress,
+                step_mode: wgpu::VertexStepMode::Vertex,
+                attributes: &VERTEX_ATTRS,
+            })],
+        },
+        primitive: wgpu::PrimitiveState {
+            topology: wgpu::PrimitiveTopology::TriangleList,
+            strip_index_format: None,
+            front_face: wgpu::FrontFace::Ccw,
+            cull_mode: None, // M1: Windings gemischt, siehe Moduldoku
+            unclipped_depth: false,
+            polygon_mode: wgpu::PolygonMode::Fill,
+            conservative: false,
+        },
+        depth_stencil: Some(wgpu::DepthStencilState {
+            format: wgpu::TextureFormat::Depth32Float,
+            depth_write_enabled: Some(!blend),
+            depth_compare: Some(wgpu::CompareFunction::Less),
+            stencil: wgpu::StencilState::default(),
+            bias: wgpu::DepthBiasState::default(),
+        }),
+        multisample: wgpu::MultisampleState::default(),
+        fragment: Some(wgpu::FragmentState {
+            module,
+            entry_point: Some("fs"),
+            compilation_options: Default::default(),
+            targets: &[Some(wgpu::ColorTargetState {
+                format,
+                blend: blend.then(|| wgpu::BlendState::ALPHA_BLENDING),
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+        }),
+        multiview_mask: None,
+        cache: None,
+    })
+}
+
+impl GfxBackend for WgpuBackend {
+    fn name(&self) -> &'static str {
+        "wgpu"
+    }
+
+    fn init(&mut self) -> Result<(), GfxError> {
+        if self.inner.is_some() {
+            return Ok(());
+        }
+        self.init_inner()
+    }
+
+    fn resize(&mut self, width: u32, height: u32) {
+        if let Some(inner) = self.inner.as_mut() {
+            inner.resize(width, height);
+        }
+    }
+
+    /// Fenster-Handle übernehmen (nur mit Feature `window` baubar).
+    #[cfg(feature = "window")]
+    fn set_window_source(
+        &mut self,
+        src: std::sync::Arc<dyn std::any::Any + Send + Sync>,
+    ) -> Result<(), GfxError> {
+        WgpuBackend::set_window_source(self, src)
+    }
+
+    fn upload_texture(&mut self, id: u64, rgba: &[u8], width: u32, height: u32) -> Result<(), GfxError> {
+        let inner = self
+            .inner
+            .as_mut()
+            .ok_or_else(|| GfxError::Device("init nicht ausgeführt".into()))?;
+        let need = (width as usize) * (height as usize) * 4;
+        if width == 0 || height == 0 || rgba.len() < need {
+            return Err(GfxError::Device(format!(
+                "upload_texture({id}): {width}x{height} braucht {need} RGBA-Bytes, hat {}",
+                rgba.len()
+            )));
+        }
+        let tex = inner.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("sheet"),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            // SC1-Palettenwerte sind sRGB — wie bei den Albedo-Texturen.
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        inner.queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &tex,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            rgba,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(width * 4),
+                rows_per_image: None,
+            },
+            wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+        );
+        let view = tex.create_view(&wgpu::TextureViewDescriptor::default());
+        inner.sheet_cache.insert(id, (tex, view, width, height));
+        Ok(())
+    }
+
+    fn render(&mut self, camera: &Camera, batches: &[DrawBatch]) -> Result<(), GfxError> {
+        let inner = self
+            .inner
+            .as_mut()
+            .ok_or_else(|| GfxError::Device("init nicht ausgeführt".into()))?;
+
+        let cam = CamUni {
+            view_proj: mat4(camera.view_proj()),
+            light_dir_time: [LIGHT_DIR[0], LIGHT_DIR[1], LIGHT_DIR[2], 0.0],
+        };
+        inner.queue.write_buffer(&inner.cam_buf, 0, pod_bytes(&cam));
+
+        // Phase 1: Buffers/Textures/Bind-Groups vorbereiten (inner &mut).
+        // Opaque zuerst, Transparent danach (Konvention des Traits).
+        let mut prepared: Vec<Prepared> = Vec::with_capacity(batches.len());
+        for pass_kind in [false, true] {
+            for b in batches {
+                // Billboard-Sprites gehören immer in den Blend-Pass.
+                let transparent = b.sprite.is_some() || b.material.base_color[3] < 0.999;
+                if transparent != pass_kind || b.mesh.positions.is_empty() {
+                    continue;
+                }
+                inner.ensure_mesh(b.mesh);
+                let key = (b.mesh as *const Mesh) as usize;
+                let Some(mg) = inner.mesh_cache.get(&key) else {
+                    continue;
+                };
+                let (Some(vbuf), ibuf) = (mg.vertex.clone(), mg.index.clone()) else {
+                    continue;
+                };
+                let (n_vertices, n_indices) = (mg.n_vertices, mg.n_indices);
+
+                let (tex_view, has_texture, uv_rect) = match &b.sprite {
+                    Some(sp) => match inner.sheet_cache.get(&sp.texture) {
+                        Some((_, v, w, h)) => {
+                            (v.clone(), [1u32, 1, 0, 0], re_render::uv_rect(sp, *w, *h))
+                        }
+                        None => (inner.white_view.clone(), [0u32; 4], [0.0, 0.0, 1.0, 1.0]),
+                    },
+                    None => {
+                        let has_tex = match &b.material.albedo_texture_id {
+                            Some(p) => inner.ensure_texture(p).is_some(),
+                            None => false,
+                        };
+                        let v = b
+                            .material
+                            .albedo_texture_id
+                            .as_ref()
+                            .and_then(|p| inner.tex_cache.get(p).map(|(_, v)| v.clone()))
+                            .unwrap_or_else(|| inner.white_view.clone());
+                        (v, [has_tex as u32, 0, 0, 0], [0.0, 0.0, 1.0, 1.0])
+                    }
+                };
+
+                let uni = BatchUni {
+                    world: mat4(b.world),
+                    base_color: b.material.base_color,
+                    has_texture,
+                    uv_rect,
+                };
+                let uni_buf = inner
+                    .device
+                    .create_buffer(&wgpu::BufferDescriptor {
+                        label: Some("batch-uni"),
+                        size: std::mem::size_of::<BatchUni>() as u64,
+                        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                        mapped_at_creation: false,
+                    });
+                inner.queue.write_buffer(&uni_buf, 0, pod_bytes(&uni));
+                let sampler = inner.sampler.clone();
+                let bind = inner.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("batch-bind"),
+                    layout: &inner.g1,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: uni_buf.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: wgpu::BindingResource::TextureView(&tex_view),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: wgpu::BindingResource::Sampler(&sampler),
+                        },
+                    ],
+                });
+
+                prepared.push(Prepared {
+                    blend: transparent,
+                    vbuf,
+                    ibuf,
+                    n_vertices,
+                    n_indices,
+                    bind,
+                });
+            }
+        }
+
+        // Phase 2: ein Render-Pass mit geklonten Handles (inner wird frei).
+        let device = inner.device.clone();
+        let queue = inner.queue.clone();
+        let depth_view = inner.depth_view.clone();
+        // Farbziel: im Fenstermodus die aktuelle Swapchain-Textur (der
+        // SurfaceTexture-Handle muss bis zum present() alive bleiben),
+        // headless die feste Ziel-Textur.
+        let mut frame: Option<wgpu::SurfaceTexture> = None;
+        let color_view = match &inner.surface {
+            Some(surface) => match surface.get_current_texture() {
+                wgpu::CurrentSurfaceTexture::Success(st)
+                | wgpu::CurrentSurfaceTexture::Suboptimal(st) => {
+                    let v = st.texture.create_view(&wgpu::TextureViewDescriptor::default());
+                    frame = Some(st);
+                    v
+                }
+                // Verdeckt/minimiert oder Acquire-Knappe: Frame folgenlos überspringen.
+                wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded => {
+                    return Ok(())
+                }
+                // Outdated/Lost: Swapchain mit gespeicherter Konfiguration
+                // neu anlegen, diesen Frame auslassen.
+                _ => {
+                    if let Some(cfg) = inner.surface_cfg.clone() {
+                        surface.configure(&inner.device, &cfg);
+                    }
+                    return Ok(());
+                }
+            },
+            None => inner.color_view.clone(),
+        };
+        let cam_bind = inner.cam_bind.clone();
+        let pipe_opaque = inner.pipe_opaque.clone();
+        let pipe_blend = inner.pipe_blend.clone();
+
+        let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("re-frame"),
+        });
+        {
+            let c = camera.clear_color;
+            let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("re-pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &color_view,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color {
+                            r: c[0] as f64,
+                            g: c[1] as f64,
+                            b: c[2] as f64,
+                            a: c[3] as f64,
+                        }),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &depth_view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.0),
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
+                ..Default::default()
+            });
+
+            let mut current_blend: Option<bool> = None;
+            for p in &prepared {
+                if current_blend != Some(p.blend) {
+                    pass.set_pipeline(if p.blend { &pipe_blend } else { &pipe_opaque });
+                    pass.set_bind_group(0, &cam_bind, &[]);
+                    current_blend = Some(p.blend);
+                }
+                pass.set_bind_group(1, &p.bind, &[]);
+                pass.set_vertex_buffer(0, p.vbuf.slice(..));
+                if let Some(ib) = &p.ibuf {
+                    pass.set_index_buffer(ib.slice(..), wgpu::IndexFormat::Uint32);
+                    pass.draw_indexed(0..p.n_indices, 0, 0..1);
+                } else {
+                    pass.draw(0..p.n_vertices, 0..1);
+                }
+            }
+        }
+        queue.submit([enc.finish()]);
+        if let Some(st) = frame {
+            // wgpu 30: Presenten ist ein Queue-Schritt NACH dem Submit.
+            queue.present(st);
+        }
+        self.frames += 1;
+        Ok(())
+    }
+}

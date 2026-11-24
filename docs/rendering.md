@@ -1,0 +1,139 @@
+# Rendering and effects pipeline
+
+English | [Deutsch](rendering.de.md)
+
+Plan of the visual engine: from the current rasterization (M1) through
+modern pipelines to ray/path tracing. All under one roof: HDR pipeline
+throughout, every stage swappable, the fallback chain downward always
+playable — even in the browser.
+
+## 0. Foundations carried by every stage
+
+* **HDR pipeline:** scene values physical (nits), tonemapping (ACES) as
+  its own post pass, exposure automatic with manual override.
+* **Temporal data mandatory from M5:** depth and motion-vector buffers
+  are part of the pipeline because upscalers, GI, reflections and
+  reconstruction build on them.
+* **Quality-tier system:** every feature reports which tier (WebGPU /
+  deck/integrated / desktop / desktop+RT) it needs; the project
+  renderer assembles a pipeline profile from that.
+
+## 1. State M1/M2 (rasterization V1) — ✅
+
+* Forward+ with clustered lights, cascaded shadows, post chain (bloom,
+  tonemap), glTF materials; offscreen and window over
+  `GfxBackend`/wgpu (Vulkan/Metal/WebGPU, DirectX via wgpu).
+
+## 2. Pipeline V2 (M5) — deferred HDR and shadows 2.0
+
+* G-buffer deferred lighting (albedo, normal, material IDs,
+  depth+motion) for many dynamic lights; forward patch for
+  transparent/emissive objects.
+* Shadows 2.0: cascaded with stabilized texels, screen-space
+  shadow-map atlas; preparing for virtual-shadow-map-style refinements
+  (later stage, needs mesh streaming from M3).
+* SMAA + optional TAA; everything in WGSL over wgpu.
+* **Upscaling adapter (`re-upscale`)** — trait, backends as modules:
+  * `Nis`/`Easu`-style spatial upscaler (everywhere, required fallback)
+  * **FSR 2/3** (temporal + frame generation): AMD ships MIT-licensed
+    shaders; ported to WGSL for all platforms, native timing on desktop.
+  * **XeSS**: runs via the shipped SPIR-V dispatcher; native backend
+    only, not WebGPU.
+  * **DLSS (super resolution, ray reconstruction, frame generation)**:
+    proprietary NVIDIA SDK, native backend only (`re-native`), optional
+    feature build; the SDK's license terms remain the user's concern.
+  * No upscaler is required: native 1:1 rendering stays a mode.
+* Motion-vector and depth formats kept compatible with FSR2/3 from the
+  start (reverse-Z convention documented).
+
+## 3. Dynamic GI and reflections (M6) — "Lumen-like"
+
+Two paths sharing one hookup to the surface data:
+
+* **Software ray tracing (default, runs everywhere):** mesh distance
+  fields per object + a global SDF clipmap around the camera; a
+  surface cache (texel binding) keeps lit surface data ready.
+  Diffuse GI via raymarching against SDFs, screenspace supplement for
+  near details.
+* **Hardware ray tracing (optional, desktop+RT):** ray queries /
+  raytracing pipeline over the native backend (Vulkan); once wgpu
+  extensions are production-ready the driver moves there — the
+  algorithms stay identical.
+* Reflections: chain of screenspace → SDF/RT rays → light-probe share;
+  every hit lands in the surface cache so GI and reflection share the
+  same energy.
+* WebGPU tier: probes + SSAO/SSR, no rays; identical materials, lower
+  effect resolution.
+* References: "Unreal Engine 5 Best Practices" and the "UE5
+  Performance Optimization Cookbook" for operating parameters; paper
+  knowledge (The Order: Real-time Global Illumination) enters as
+  technique.
+
+## 4. Path tracing and reconstruction (M7)
+
+* **Progressive path tracer** as its own renderer mode (PC/console
+  backends): the same scene, BVH from the streaming system, many
+  samples across frames; the goal is "offline quality" in the editor
+  for bakes and stills — in the game the M6 path keeps running.
+* **ReSTIR-like importance reuse** and temporal accumulation against
+  noise; then **ray reconstruction** as a denoiser stage:
+  * NVIDIA SDK (DLSS-SR/RR) as optional native backend,
+  * open fallback with a self-built spatio-temporal reconstructor.
+* Bake outputs (lightmaps, SDFs, HLODs) are produced by a Go build
+  farm (section 2 in [architecture.md](architecture.md)) so the engine
+  UI stays responsive while computing.
+
+## 5. VFX: particles and effects (M8)
+
+* GPU particles (compute): emission, forces, collision against SDFs and
+  heightfield, ribbon and mesh renderers; effects as an editable node
+  graph in the editor (Niagara-like, data-driven).
+* Screen-space effects library: distortion, heat shimmer, explosions,
+  hit flashes — a recipe collection from the "UE5 VFX Cookbook"
+  translated into the engine's own renderer terms.
+* Budgets per effect class (count, VRAM, fill) run through the
+  capability registry so AI and tools respect them.
+
+## 6. Audio and SFX (M8)
+
+* Rust runtime mixer: buses, sidechaining, reverb zones, 3D
+  spatialization; sample playback with streaming from the asset DB.
+* **SFX as events, not files:** events (tree/graph) trigger layers,
+  random variants, pitch-volume spread — editable like particle
+  graphs, fired by animation events and gameplay signals.
+* Console/headless tests: a silent backend that only validates graphs.
+
+## 7. Animation and character (M8)
+
+* Skeletal animation (accelerated, GPU skinning), blend trees and state
+  machines as editable graphs; "UE5 Character Creation, Animation and
+  Cinematics" as workflow reference.
+* For the signature feature: the same unit must exist as squad
+  billboard, game mesh and first-person camera carrier — the tiers
+  share transform and state machine.
+
+## 8. Web path (M9, continuously testable)
+
+* wgpu→WebGPU: pipeline V2 with SMAA/TAA and spatial upscale, GI probes
+  instead of rays; the target is a playable strategy-game prototype
+  including the camera flight (quality tiers work there too).
+* Go services stay server-side; the browser is a client like any other.
+
+## 9. Milestones of this pipeline
+
+| Stage | Content | Gate |
+|---|---|---|
+| M5 | deferred HDR, shadows 2.0, `re-upscale` (NIS + FSR2/3 port), motion/depth | identical scene playable on deck and desktop |
+| M6 | GI/reflections (SDF + surface cache, HW-RT option), light editor | interior scene lit correctly without bakes |
+| M7 | path tracer + reconstruction, bake outputs | still image in offline quality from the game scene |
+| M8 | GPU particles + effect graphs, audio mixer + SFX events | test scene: gunfire with light, smoke, sound |
+| M9 | WebGPU build of the signature feature | strategy→first-person camera flight in the browser |
+
+## 10. Realistic limits
+
+* The DLSS/XeSS SDKs are hardware- and license-dependent — they are
+  adapters, never a precondition; the engine works fully without them.
+* Hardware RT under wgpu is a moving target; the SDF path is
+  deliberately not a stopgap but the portable base solution.
+* Large scenes cost memory: the VRAM-budget rules from
+  [vram.md](vram.md) also apply to GI intermediate buffers.

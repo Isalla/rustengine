@@ -1,0 +1,9 @@
+/target
+
+# Arbeitsanweisungen für KI-Agenten — nur lokal, nicht für das öffentliche Repo
+AGENTS.md
+
+# Grafik-Vorlagen (Uploads) — ins Repo gehoeren nur die erzeugten
+# Auslieferungsdateien unter media/
+re.png
+icon.png

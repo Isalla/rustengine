@@ -1,0 +1,12 @@
+[package]
+name = "re-io"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+glam.workspace = true
+gltf = { version = "1", default-features = false, features = ["import", "names", "utils"] }
+gltf-json = { version = "1.4.1", features = ["names"] }
+re-core.workspace = true

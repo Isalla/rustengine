@@ -1,0 +1,38 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/re-core",
+    "crates/re-ecs",
+    "crates/re-io",
+    "crates/re-render",
+    "crates/re-platform",
+    "crates/re-wgpu",
+    "crates/re-agent",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+repository = "https://example.invalid/rustengine"
+
+[workspace.dependencies]
+re-core = { path = "crates/re-core" }
+re-ecs = { path = "crates/re-ecs" }
+re-io = { path = "crates/re-io" }
+re-render = { path = "crates/re-render" }
+re-platform = { path = "crates/re-platform" }
+re-wgpu = { path = "crates/re-wgpu" }
+re-agent = { path = "crates/re-agent" }
+
+glam = { version = "0.30", features = ["serde"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+thiserror = "2"
+tracing = "0.1"
+winit = "0.30"
+raw-window-handle = "0.6"
+
+[profile.release]
+lto = "thin"

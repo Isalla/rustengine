@@ -1,0 +1,26 @@
+[package]
+name = "re-wgpu"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+# Window = echtes Fenster über winit (Surface-Rendering). Ohne dieses
+# Feature bleibt das Backend rein headless (Offscreen + Readback),
+# damit Pi und CI ohne Display/X11-Bibliotheken bauen koennen.
+default = ["window"]
+window = ["dep:winit", "dep:re-platform"]
+
+[dependencies]
+re-core.workspace = true
+re-render.workspace = true
+anyhow.workspace = true
+glam.workspace = true
+wgpu = "30"
+winit = { workspace = true, optional = true }
+re-platform = { workspace = true, optional = true }
+image = { version = "0.25", default-features = false, features = ["png"] }
+
+[[bin]]
+name = "re-demo"
+path = "src/bin/re-demo.rs"

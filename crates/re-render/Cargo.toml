@@ -1,0 +1,12 @@
+[package]
+name = "re-render"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+re-core.workspace = true
+glam.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+# wgpu kommt in M1, solange bleibt der Crate leicht kompilierbar.

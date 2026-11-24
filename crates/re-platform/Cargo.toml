@@ -1,0 +1,16 @@
+[package]
+name = "re-platform"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+# Fenster-Backend (M2): nur hinter dem Feature `window`, damit Headless-
+# Builds (Pi, CI) ohne winit/X11 kompilieren. Konsolen-SDK-Module (NDA)
+# werden analog als austauschbare Module eingeklinkt.
+winit = { workspace = true, optional = true }
+raw-window-handle = { workspace = true, optional = true }
+
+[features]
+default = ["window"]
+window = ["dep:winit", "dep:raw-window-handle"]
