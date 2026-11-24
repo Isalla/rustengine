@@ -15,15 +15,21 @@ RE grew out of a level editor called Worldbuilder and adopted its data
 model: scene graph, meshes, materials with textures, animations and
 skeletons, terrain and tilesets, plus a glTF 2.0 pipeline.
 
-**The signature feature this architecture is built around:** a strategy
-game that drops from the top-down overview into a unit's first-person
-view with no loading screen and no cut — the camera flies onto the unit
-and hands over control on the way. Details:
-[docs/architecture.md](docs/architecture.md).
+**The signature feature this architecture is built around:** seamless
+switching between perspectives and genres — the camera drops from the
+top-down strategy overview into a unit's first-person view with no
+loading screen and no cut, handing over control on the way, and flies
+back out again. The engine keeps world data, streaming and quality
+tiers flowing across the transition; nothing reloads mid-flight. The
+runtime itself carries no game rules, which is what lets the same
+stack serve strategy, shooter and MMO. The first project putting it to
+the test is a strategy game; a shooter and an MMO are the planned
+follow-ups. Details: [docs/architecture.md](docs/architecture.md).
 
-**Status:** early development. The core data model, import/export and
-the first backend are working; the window layer, ECS, audio/physics and
-the editor are coming together milestone by milestone (see below).
+**Status:** early development. The core data model, import/export, the
+first backend, the window layer, ECS and the world-streaming core are
+working; the async IO pipeline, audio/physics and the editor are
+coming together milestone by milestone (see below).
 
 ## Crates
 
@@ -32,6 +38,7 @@ the editor are coming together milestone by milestone (see below).
 | `re-core` | Data model: scene, mesh, material, animation, terrain, tilesets | done |
 | `re-io` | glTF 2.0 import/export incl. texture embedding | done |
 | `re-ecs` | Entity-component-system: world, sparse-set storage, schedule | in progress |
+| `re-world` | World partition: grid cells, clipmap streaming, quality tiers T0..T4, streaming budget | in progress |
 | `re-render` | Backend-neutral render layer (`GfxBackend`), camera, billboards | in progress |
 | `re-wgpu` | wgpu backend: Vulkan/Metal/WebGPU (DirectX via wgpu), offscreen and windowed | in progress |
 | `re-platform` | Windows, input, event loop, time (winit; headless for tests) | in progress |
@@ -71,7 +78,8 @@ Headless builds without window libraries:
 - **M0** — repo, workspace, core data model and glTF pipeline ✅
 - **M1** — `re-render` + `re-wgpu`: render scenes with glTF textures (offscreen) ✅
 - **M2** — `re-platform`: windows, input, delta time, surface rendering ✅
-- **M3** — ECS + world streaming: world partition, LOD/HLOD, async loading pipeline, MCP tools for agents
+- **M3** — ECS + world streaming: world partition ✅ (`re-ecs` + `re-world`: grid, clipmap, tiers, streaming core); async loading pipeline and MCP tools for agents still open
+- **Wiki** — documentation in three layers: rustdoc on GitHub Pages (built from the crate docs), user handbook EN/DE (mdBook), API browser inside the editor (fed by `cargo rustdoc --output-format json`, sharing the registry idea with the agent core)
 - **M4** — editor: scene view, outliner, inspector, import pipelines, undo
 - **M5** — render pipeline V2: deferred HDR, shadows 2.0, upscaling adapters (FSR/XeSS/DLSS) ([docs/rendering.md](docs/rendering.md))
 - **M6** — dynamic GI and reflections: Lumen-style software ray-tracing path, hardware RT optional
