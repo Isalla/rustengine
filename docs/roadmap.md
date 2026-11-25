@@ -82,6 +82,15 @@ honest state of repair. ✅ done and test-covered · 🟡 partially built ·
 - [x] Import pipeline wrapping `re-io` (`re-editor::import` — `import_gltf`, `import.preview`/`import.gltf` capabilities, Roundtrip-Test)
 - [x] Undo/redo as reversible systems (`re-editor::undo` — `Command<T>` trait, `CommandStack` with cursor, built-in commands for camera/selection/view-mode, `editor.undo/redo/history` capabilities)
 - [x] Worldbuilder project loader (`re-editor::project` — `ProjectDoc` mit Pfad/Dirty, `project.new/load/save/close/info` capabilities, Roundtrip-Test)
+- [ ] Interchange expansion (migration without starting from zero):
+      registry-driven importers/exporters — FBX (meshes & animation),
+      USD (scene bridge, UE5 reads/writes it natively), OBJ legacy, on
+      top of the existing glTF path; asset extraction from Unity
+      packages (`.unitypackage` is a zip of real assets). Open bridges
+      only: the official exporters in UE/Unity deliver the data —
+      proprietary scene formats (`.uasset`/`.umap`, `.unity`) are never
+      parsed, and game code (Blueprints, MonoBehaviours) never migrates
+      anyway; it is rewritten as ECS systems
 
 ## M5 — Render pipeline V2 ⬜
 
@@ -179,6 +188,26 @@ normal assets — the simulation core stays deterministic)**
       llama.cpp, API) plus the MCP export — same registry, both doors
 - [ ] Generation telemetry: cost/latency accounting per tool call so
       an agent run can be capped and audited
+
+## M12 — Procedural worlds (runtime + editor) ⬜
+
+*Rising World and Minecraft proved that players accept a generated
+world as the game itself. The engine's deterministic headless core
+(`re-world`) is built for exactly this: same seed → same world, on
+every machine, in the game and in the editor.*
+
+- [ ] Deterministic generator core: seeded RNG + noise fields in
+      `re-world` — reproducible across platforms, so multiplayer syncs
+      a seed instead of geometry
+- [ ] Runtime chunk generation: the streamer treats generated cells
+      like file-backed ones (same `CellSource` trait) — infinite
+      terrain under the existing budget, tier and HLOD rules
+- [ ] PCG graphs as ECS schedules: spawners, biome rules, WFC-style
+      tile assembly — authored once, runs in-game and in the editor
+      (double addressability: every generator is a registry tool)
+- [ ] Generate → author: hand edits persist as deltas/override regions
+      over the generated base; a bake step exports any region to
+      static cells for shipping
 
 ## Wiki — documentation in three layers 🟡
 

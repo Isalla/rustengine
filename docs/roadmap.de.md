@@ -85,6 +85,15 @@ mit ehrlichem Haken-Stand. ✅ fertig und testabgedeckt · 🟡 teilweise gebaut
 - [x] Import-Pipeline um `re-io` (`re-editor::import` — `import_gltf`, `import.preview`/`import.gltf`-Capabilities, Roundtrip-Test)
 - [x] Undo/Redo als umkehrbare Systeme (`re-editor::undo` — `Command<T>`-Trait, `CommandStack` mit Cursor, Built-in-Commands für Kamera/Selektion/Ansichtsmodus, `editor.undo/redo/history`-Capabilities)
 - [x] Worldbuilder-Projekt-Loader (`re-editor::project` — `ProjectDoc` mit Pfad/Dirty, `project.new/load/save/close/info`-Capabilities, Roundtrip-Test)
+- [ ] Interchange-Ausbau (Migration ohne Nullstart): registrgesteuerte
+      Importierer/Exportierer — FBX (Meshes & Animationen), USD
+      (Szenen-Brücke, UE5 nativ), OBJ-Legat, zusätzlich zum bestehenden
+      glTF-Pfad; Asset-Extraktion aus Unity-Paketen (`.unitypackage`
+      ist ein Zip echter Assets). Nur offene Brücken: die offiziellen
+      Exporter von UE/Unity liefern die Daten — proprietäre
+      Szenenformate (`.uasset`/`.umap`, `.unity`) werden nie gelesen,
+      und Spiel-Code (Blueprints, MonoBehaviours) wandert ohnehin nie
+      mit; er wird als ECS-System neu geschrieben
 
 ## M5 — Render-Pipeline V2 ⬜
 
@@ -186,6 +195,28 @@ normale Assets — der Simulationskern bleibt deterministisch)**
       llama.cpp, API) plus MCP-Export — dieselbe Registry, beide Türen
 - [ ] Generierungs-Telemetrie: Kosten-/Latenz-Buchführung pro
       Werkzeugaufruf, damit ein Agenten-Lauf gedeckelt und prüfbar ist
+
+## M12 — Prozedurale Welten (Runtime + Editor) ⬜
+
+*Rising World und Minecraft haben gezeigt: Spieler akzeptieren eine
+generierte Welt als das Spiel selbst. Der deterministische Headless-
+Kern (`re-world`) ist genau dafür gebaut: gleicher Seed → gleiche
+Welt, auf jeder Maschine, im Spiel wie im Editor.*
+
+- [ ] Deterministischer Generator-Kern: Seed-RNG + Noise-Felder in
+      `re-world` — plattformübergreifend reproduzierbar, im Multiplayer
+      wandert ein Seed statt Geometrie
+- [ ] Runtime-Chunk-Generierung: der Streamer behandelt generierte
+      Zellen wie Datei-Zellen (derselbe `CellSource`-Trait) —
+      unendliche Terrain unter den bestehenden Budget-, Tier- und
+      HLOD-Regeln
+- [ ] PCG-Graphen als ECS-Schedules: Spawner, Biome-Regeln,
+      WFC-artige Tile-Assemblierung — einmal authored, läuft im Spiel
+      und im Editor (doppelte Adressierbarkeit: jeder Generator ist
+      ein Registry-Tool)
+- [ ] Erzeugen → Nachbearbeiten: Hand-Edits bleiben als
+      Delta-/Override-Regionen über der generierten Basis liegen; ein
+      Bake-Schritt exportiert jede Region zu statischen Zellen
 
 ## Wiki — Doku in drei Stufen 🟡
 
