@@ -22,6 +22,7 @@ pub mod backend;
 pub mod billboard;
 pub mod camera;
 pub mod cluster;
+pub mod gbuffer;
 pub mod hdr;
 pub mod jitter;
 pub mod shadow;
@@ -30,6 +31,7 @@ pub use backend::{DrawBatch, GfxBackend, GfxError, NullBackend, Sprite};
 pub use billboard::{billboard_matrix, unit_quad, uv_rect};
 pub use camera::Camera;
 pub use cluster::{log_z_bounds, ClusterGrid};
+pub use gbuffer::{octahedral_decode, octahedral_encode, quantize_uv};
 pub use hdr::{
     ev100_from_luminance, exposure_from_ev100, linear_to_srgb, luminance, mean_luminance,
     srgb_to_linear, AdaptiveExposure, HdrPipeline, ToneCurve, MIDDLE_GRAY,
