@@ -58,4 +58,4 @@ pub use hdr::{
     srgb_to_linear, AdaptiveExposure, HdrPipeline, ToneCurve, MIDDLE_GRAY,
 };
 pub use jitter::{halton, JitterPattern};
-pub use shadow::CascadeSetup;
+pub use shadow::{fit_cascade, CascadeFit, CascadeSetup};
