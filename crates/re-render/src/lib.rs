@@ -18,7 +18,8 @@
 //! - [`cluster`] — Cluster-Grid (Kacheln x log-Tiefscheiben) fuer
 //!   Licht-Culling und Clustered Shadows.
 //! - [`jitter`]  — Subpixel-Jitter (Halton) fuer TAA und Upscaler.
-//! - [`gbuffer`] — oktaedrische Normalen-Kodierung.
+//! - [`gbuffer`] — oktaedrische Normalen-Kodierung und das
+//!   G-Buffer-Kanal-Layout als Daten (ADR-0003).
 //! - [`cull`]    — Frustum-Ebenen, Kugel/AABB-Tests, Hi-Z-Occlusion.
 //!
 //! Geplante Backend-Module (je ein eigener Crate, ggf. eigenes Repo):
@@ -45,7 +46,11 @@ pub use billboard::{billboard_matrix, unit_quad, uv_rect};
 pub use camera::Camera;
 pub use cluster::{log_z_bounds, ClusterGrid};
 pub use cull::{Frustum, HiZPyramid, Plane};
-pub use gbuffer::{octahedral_decode, octahedral_encode, quantize_uv};
+pub use gbuffer::{
+    octahedral_decode, octahedral_encode, pack_visibility_id, quantize_uv,
+    unpack_visibility_id, ChannelSemantic, GBufferLayout, GBufferTarget, GfxFormat,
+    Surface,
+};
 pub use hdr::{
     ev100_from_luminance, exposure_from_ev100, linear_to_srgb, luminance, mean_luminance,
     srgb_to_linear, AdaptiveExposure, HdrPipeline, ToneCurve, MIDDLE_GRAY,
