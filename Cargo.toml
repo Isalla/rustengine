@@ -9,6 +9,7 @@ members = [
     "crates/re-wgpu",
     "crates/re-world",
     "crates/re-agent",
+    "crates/re-editor",
 ]
 
 [workspace.package]

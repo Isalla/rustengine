@@ -1,0 +1,29 @@
+[package]
+name = "re-editor"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+# Fenster = echtes Fenster ueber winit (M4.1). Ohne dieses Feature bleibt
+# der Editor-Kern rein headless (Kamera, Selektion, Capabilities) und
+# kompiliert auf Pi/CI ohne Display — analog zu re-wgpu/re-platform.
+default = ["window"]
+window = ["dep:re-platform", "dep:re-wgpu"]
+
+[dependencies]
+re-core.workspace = true
+re-render.workspace = true
+re-world.workspace = true
+re-agent.workspace = true
+re-wgpu = { workspace = true, optional = true }
+re-platform = { workspace = true, optional = true }
+glam.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+image = { version = "0.25", default-features = false, features = ["png"] }
+
+[[bin]]
+name = "re-editor"
+path = "src/bin/editor.rs"
