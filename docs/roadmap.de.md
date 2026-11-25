@@ -81,7 +81,7 @@ mit ehrlichem Haken-Stand. ✅ fertig und testabgedeckt · 🟡 teilweise gebaut
 - [x] Szenen-Ansicht mit live Kamera in die streamende Welt
       (`re-editor` — frei fliegende Kamera, streamende Welt folgt dem
       Blickpunkt; Fenster- + Headless-Smoke-Pfad)
-- [ ] Outliner & Inspector über der ECS
+- [x] Outliner & Inspector über der ECS (`re-editor::outliner` — `ComponentRegistry` mit typgelöschtem JSON-Zugriff, `Outliner`, `ecs.entities/entity.components/entity.get/entity.set`-Capabilities; `re-ecs`-`World` auf `Send` gestellt)
 - [x] Import-Pipeline um `re-io` (`re-editor::import` — `import_gltf`, `import.preview`/`import.gltf`-Capabilities, Roundtrip-Test)
 - [x] Undo/Redo als umkehrbare Systeme (`re-editor::undo` — `Command<T>`-Trait, `CommandStack` mit Cursor, Built-in-Commands für Kamera/Selektion/Ansichtsmodus, `editor.undo/redo/history`-Capabilities)
 - [x] Worldbuilder-Projekt-Loader (`re-editor::project` — `ProjectDoc` mit Pfad/Dirty, `project.new/load/save/close/info`-Capabilities, Roundtrip-Test)

@@ -174,10 +174,8 @@ mod live {
     }
 
     pub struct EditorApp {
-        backend: Option<WgpuBackend>,
         window_src: Option<WindowHandleSource>,
         size: (u32, u32),
-        cells_dir: PathBuf,
         clip: Clipmap,
         streamer: Streamer<re_world::AsyncSource<Chunk>>,
         handoff: CellHandoff<Chunk>,
@@ -193,7 +191,6 @@ mod live {
         now: f64,
         hlod: re_world::HlodSet,
         outer: f64,
-        seed_x0: f64,
     }
 
     impl EditorApp {
@@ -216,10 +213,8 @@ mod live {
                 key.x >= gx0 && key.x <= gx1 && key.y >= gz0 && key.y <= gz1
             };
             Self {
-                backend: None,
                 window_src: None,
                 size: (1280, 720),
-                cells_dir,
                 clip,
                 streamer,
                 handoff,
@@ -235,7 +230,6 @@ mod live {
                 now: 0.0,
                 hlod,
                 outer,
-                seed_x0,
             }
         }
 
@@ -398,7 +392,7 @@ mod live {
         backend.resize(w, h);
 
         let mut now = 0.0f64;
-        let mut camera = EditorCamera::new(Vec3::new(0.0, 80.0, 0.0));
+        let camera = EditorCamera::new(Vec3::new(0.0, 80.0, 0.0));
         for _ in 0..frames {
             now += 1.0 / 60.0;
             let cam2 = Vec2::new(camera.position.x, camera.position.z);

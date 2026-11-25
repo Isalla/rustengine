@@ -5,7 +5,11 @@ use std::any::Any;
 use crate::entity::Entity;
 
 /// Typ-erase Ansicht auf einen Sparse-Set (für die Welt-Registry).
-pub(crate) trait Storage: Any {
+///
+/// `Send` als Supertrait, damit `World` (und damit `Mutex<World>`) über
+/// Threads geteilt werden kann — Editor und Agent adressieren dieselbe
+/// Welt. Alle Komponenten sind `Send + Sync` (siehe `Component`).
+pub(crate) trait Storage: Any + Send {
     fn len(&self) -> usize;
     fn contains(&self, entity: Entity) -> bool;
     fn remove_entity(&mut self, entity: Entity);
@@ -94,7 +98,7 @@ impl<T: 'static> SparseSet<T> {
     }
 }
 
-impl<T: 'static> Storage for SparseSet<T> {
+impl<T: Send + Sync + 'static> Storage for SparseSet<T> {
     fn len(&self) -> usize {
         self.data.len()
     }

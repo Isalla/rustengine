@@ -13,9 +13,11 @@ window = ["dep:re-platform", "dep:re-wgpu"]
 
 [dependencies]
 re-core.workspace = true
+re-ecs.workspace = true
 re-render.workspace = true
 re-world.workspace = true
 re-agent.workspace = true
+re-io.workspace = true
 re-wgpu = { workspace = true, optional = true }
 re-platform = { workspace = true, optional = true }
 glam.workspace = true
