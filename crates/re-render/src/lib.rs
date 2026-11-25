@@ -22,6 +22,7 @@ pub mod backend;
 pub mod billboard;
 pub mod camera;
 pub mod hdr;
+pub mod jitter;
 pub mod shadow;
 
 pub use backend::{DrawBatch, GfxBackend, GfxError, NullBackend, Sprite};
@@ -31,4 +32,5 @@ pub use hdr::{
     ev100_from_luminance, exposure_from_ev100, linear_to_srgb, luminance, mean_luminance,
     srgb_to_linear, AdaptiveExposure, HdrPipeline, ToneCurve, MIDDLE_GRAY,
 };
+pub use jitter::{halton, JitterPattern};
 pub use shadow::CascadeSetup;
