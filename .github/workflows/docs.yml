@@ -43,21 +43,7 @@ jobs:
         run: |
           mkdir -p _site/rustdoc
           cp -r target/doc/* _site/rustdoc/
-          # rustdoc erzeugt in neueren Versionen keine index.html oben —
-          # eine kleine Umleitung sorgt dafuer, dass /rustdoc/ funktioniert.
-          cat > _site/rustdoc/index.html <<'EOF'
-<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta http-equiv="refresh" content="0; url=re_core/index.html">
-<title>RE — API reference (rustdoc)</title>
-</head>
-<body>
-<p>API reference: <a href="re_core/index.html">re_core</a> (and the other crates in the sidebar).</p>
-</body>
-</html>
-EOF
+          cp www/rustdoc-index.html _site/rustdoc/index.html
           cp www/index.html _site/index.html
 
       - uses: actions/configure-pages@v5
