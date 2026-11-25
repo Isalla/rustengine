@@ -46,8 +46,9 @@ folgt der Editor (M4), Audio/Physik Meilenstein für Meilenstein
 | `re-wgpu` | wgpu-Backend: Vulkan/Metal/WebGPU (DirectX über wgpu), Offscreen und Fenster | in Arbeit |
 | `re-platform` | Fenster, Eingabe, Event-Loop, Zeit (winit; headless für Tests) | in Arbeit |
 | `re-agent` | Capability-Registry + Anbindung von KI-Providern (Ollama, llama.cpp, OpenAI-kompatibel, Anthropic) + Welt-Werkzeuge für Agenten | in Arbeit |
+| `re-editor` | Editor-Kern (Kamera, Selektion) + Szenen-Ansicht in die gestreamte Welt | in Arbeit |
 
-Geplant: `re-editor` (M4), natives Backend `re-native` (M6/M7 für
+Geplant: `re-editor` (M4, in Arbeit), natives Backend `re-native` (M6/M7 für
 Raytracing und DLSS), `re-audio`/`re-vfx`/`re-physics` (M8), Go-Dienste
 unter `services/` (M9).
 

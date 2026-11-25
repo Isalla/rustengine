@@ -75,7 +75,9 @@ honest state of repair. ✅ done and test-covered · 🟡 partially built ·
 
 ## M4 — Editor ⬜ ← current focus
 
-- [ ] Scene view with live camera into the streaming world
+- [x] Scene view with live camera into the streaming world
+      (`re-editor` — free-fly camera, streaming world follows the
+      viewpoint; windowed + headless smoke path)
 - [ ] Outliner & inspector over the ECS
 - [ ] Import pipeline UI wrapping `re-io`
 - [ ] Undo/redo as reversible systems

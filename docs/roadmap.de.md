@@ -78,7 +78,9 @@ mit ehrlichem Haken-Stand. ✅ fertig und testabgedeckt · 🟡 teilweise gebaut
 
 ## M4 — Editor ⬜ ← aktueller Fokus
 
-- [ ] Szenen-Ansicht mit live Kamera in die streamende Welt
+- [x] Szenen-Ansicht mit live Kamera in die streamende Welt
+      (`re-editor` — frei fliegende Kamera, streamende Welt folgt dem
+      Blickpunkt; Fenster- + Headless-Smoke-Pfad)
 - [ ] Outliner & Inspector über der ECS
 - [ ] Import-Pipeline-UI um `re-io`
 - [ ] Undo/Redo als umkehrbare Systeme

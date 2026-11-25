@@ -45,8 +45,9 @@ is next; audio/physics follow milestone by milestone (see below).
 | `re-wgpu` | wgpu backend: Vulkan/Metal/WebGPU (DirectX via wgpu), offscreen and windowed | in progress |
 | `re-platform` | Windows, input, event loop, time (winit; headless for tests) | in progress |
 | `re-agent` | Capability registry + AI provider bindings (Ollama, llama.cpp, OpenAI-compatible, Anthropic) + agent-facing world tools | in progress |
+| `re-editor` | Editor core (camera, selection) + scene view into the streaming world | in progress |
 
-Planned: `re-editor` (M4), native backend `re-native` (M6/M7 for ray
+Planned: `re-editor` (M4, in progress), native backend `re-native` (M6/M7 for ray
 tracing and DLSS), `re-audio`/`re-vfx`/`re-physics` (M8), Go services
 under `services/` (M9).
 
