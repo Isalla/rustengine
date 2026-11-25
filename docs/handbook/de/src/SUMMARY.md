@@ -7,4 +7,5 @@
 - [Welt-Streaming](./streaming.md)
 - [Die Engine aus Rust ansprechen](./rust-api.md)
 - [Capabilities & KI](./capabilities.md)
+- [Der Editor](./editor.md)
 - [Mitwirken](./contributing.md)
