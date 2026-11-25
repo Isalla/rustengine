@@ -85,15 +85,15 @@ mit ehrlichem Haken-Stand. ✅ fertig und testabgedeckt · 🟡 teilweise gebaut
 - [x] Import-Pipeline um `re-io` (`re-editor::import` — `import_gltf`, `import.preview`/`import.gltf`-Capabilities, Roundtrip-Test)
 - [x] Undo/Redo als umkehrbare Systeme (`re-editor::undo` — `Command<T>`-Trait, `CommandStack` mit Cursor, Built-in-Commands für Kamera/Selektion/Ansichtsmodus, `editor.undo/redo/history`-Capabilities)
 - [x] Worldbuilder-Projekt-Loader (`re-editor::project` — `ProjectDoc` mit Pfad/Dirty, `project.new/load/save/close/info`-Capabilities, Roundtrip-Test)
-- [ ] Interchange-Ausbau (Migration ohne Nullstart): registrgesteuerte
-      Importierer/Exportierer — FBX (Meshes & Animationen), USD
-      (Szenen-Brücke, UE5 nativ), OBJ-Legat, zusätzlich zum bestehenden
-      glTF-Pfad; Asset-Extraktion aus Unity-Paketen (`.unitypackage`
-      ist ein Zip echter Assets). Nur offene Brücken: die offiziellen
-      Exporter von UE/Unity liefern die Daten — proprietäre
-      Szenenformate (`.uasset`/`.umap`, `.unity`) werden nie gelesen,
-      und Spiel-Code (Blueprints, MonoBehaviours) wandert ohnehin nie
-      mit; er wird als ECS-System neu geschrieben
+- [ ] Mehr Dateiformate (Breite statt Einzel-Tool-Migration):
+      registrgesteuerte Importierer/Exportierer — FBX (Meshes &
+      Animationen), OBJ-Legat und USD (Szenen-Austausch) zusätzlich zum
+      bestehenden glTF-Pfad. Nur offene Standards; Inhalte aus anderen
+      Engines kommen über deren offizielle Exporter (UE/Unity
+      exportieren selbst FBX/USD/glTF). Proprietäre Szenenformate
+      (`.uasset`/`.umap`, `.unity`) bleiben unsupported — als Idee
+      geparkt, bis die Hersteller offene Formate veröffentlichen;
+      Spiel-Code wandert ohnehin nie mit
 
 ## M5 — Render-Pipeline V2 ⬜
 
@@ -200,12 +200,23 @@ normale Assets — der Simulationskern bleibt deterministisch)**
 
 *Rising World und Minecraft haben gezeigt: Spieler akzeptieren eine
 generierte Welt als das Spiel selbst. Der deterministische Headless-
-Kern (`re-world`) ist genau dafür gebaut: gleicher Seed → gleiche
-Welt, auf jeder Maschine, im Spiel wie im Editor.*
+Kern (`re-world`) ist genau dafür gebaut — mit einer Designregel aus
+dem Produkt: **die Autoren-Beschreibung ist der Input, der Seed wird
+aus ihr abgeleitet** (Hash des Parameter-Dokuments), nie umgekehrt.
+Kein Seed-Glücksspiel.*
 
-- [ ] Deterministischer Generator-Kern: Seed-RNG + Noise-Felder in
-      `re-world` — plattformübergreifend reproduzierbar, im Multiplayer
-      wandert ein Seed statt Geometrie
+- [ ] Beschreibung zuerst: die Autorin definiert Absicht — Biome-
+      Karten, Feature-Regeln („Fluss vom Gebirge zum südlichen Meer"),
+      Dichte-Graphen, Control-Bitmaps. Der Seed wird *abgeleitet*:
+      deterministischer Hash des kanonischen Parameter-Dokuments, die
+      Welt-ID ist eine Content-Adresse. Varianten = gezählter
+      Hash-Suffix („zehn ähnliche"). Hash-Namensräume je Layer: wer
+      eine Sektion ändert, würfelt nur deren Zufallsstrom neu — der
+      Rest der Welt bleibt identisch
+- [ ] Deterministischer Generator-Kern: Noise-Felder und
+      Regelauswertung auf den abgeleiteten Strömen —
+      plattformübergreifend reproduzierbar, im Multiplayer wandert die
+      Beschreibung (oder ihr Hash) statt Geometrie
 - [ ] Runtime-Chunk-Generierung: der Streamer behandelt generierte
       Zellen wie Datei-Zellen (derselbe `CellSource`-Trait) —
       unendliche Terrain unter den bestehenden Budget-, Tier- und
