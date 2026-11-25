@@ -30,11 +30,16 @@ unten immer spielbar — auch im Browser.
 * G-buffer-Deferred-Lighting (albedo, normal, material-IDs,
   Depth+Motion) für viele dynamische Lichter; Forward-Patch für
   transparente/emissive Objekte.
-* **Offene Entscheidung — G-Buffer-Layout:** klassisches MRT-G-Buffer
-  vs. Visibility Buffer (der erste Pass schreibt nur Instance- +
-  Primitive-ID, der Lighting-Pass rekonstruiert die Materialdaten aus
-  Bindless-Arrays). Der Visibility Buffer passt zum GPU-getriebenen Pfad
-  unten; entscheiden, bevor der erste GPU-Pass landet.
+* **G-Buffer-Layout — entschieden ([ADR-0003](adr/0003-gbuffer-first-visibility-buffer.de.md)):**
+  Box 1 erscheint mit dem klassischen MRT-G-Buffer (Albedo+Metallic,
+  oktaedrische Normalen, Roughness/Material, Depth+Motion) — der
+  einzige Oberflächen-Lieferant, den jede Stufe inklusive WebGPU läuft.
+  Der Lighting-Pass liest über eine abstrakte
+  Oberflächen-Abfrage-Schnittstelle; der **Visibility Buffer**
+  (Instance+Primitive-ID, Material aus Bindless-Arrays) kommt später
+  als zweite Quelle für die Desktop-Stufe, zusammen mit dem
+  GPU-getriebenen Pfad unten — gleiches Lighting, ~60 MB → ~8 MB
+  Geometrie-Traffic bei 1080p unter der Strategie-Kamera.
 * **Render-Graph:** die Pass-Kette (Shadow → G-Buffer → Lighting → Post)
   wird einmal als Daten deklariert; der Graph plant die Pässe, verwaltet
   ihre Zwischen-Texturen (Zuteilung und Aliasing) und die

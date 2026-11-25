@@ -11,3 +11,4 @@ durable "why", alongside the "how" in the [architecture paper](../architecture.m
 |---|---|---|
 | [0001](0001-modular-editor-frontend.md) | Modular, preset-driven editor frontend | Accepted |
 | [0002](0002-authoring-surfaces-and-ai-assistant.md) | Authoring surfaces and the AI assistant panel | Accepted |
+| [0003](0003-gbuffer-first-visibility-buffer.md) | G-buffer first, visibility buffer as second surface source | Accepted |

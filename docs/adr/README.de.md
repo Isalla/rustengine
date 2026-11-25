@@ -12,3 +12,4 @@ Konsequenzen fest — das beständige „Warum" neben dem „Wie" im
 |---|---|---|
 | [0001](0001-modular-editor-frontend.de.md) | Modulares, preset-gesteuertes Editor-Frontend | Angenommen |
 | [0002](0002-authoring-surfaces-and-ai-assistant.de.md) | Autor-Oberflächen und das KI-Assistenten-Panel | Angenommen |
+| [0003](0003-gbuffer-first-visibility-buffer.de.md) | G-Buffer zuerst, Visibility Buffer als zweite Oberflächenquelle | Angenommen |

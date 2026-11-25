@@ -30,11 +30,15 @@ playable — even in the browser.
 * G-buffer deferred lighting (albedo, normal, material IDs,
   depth+motion) for many dynamic lights; forward patch for
   transparent/emissive objects.
-* **Open decision — G-buffer layout:** classic MRT G-buffer vs.
-  visibility buffer (first pass writes only instance + primitive IDs,
-  the lighting pass reconstructs material data from bindless arrays).
-  The visibility buffer pairs with the GPU-driven path below; decide
-  before the first GPU pass lands.
+* **G-buffer layout — decided ([ADR-0003](adr/0003-gbuffer-first-visibility-buffer.md)):**
+  Box 1 ships the classic MRT G-buffer (albedo+metallic, octahedral
+  normals, roughness/material, depth+motion) — the only surface source
+  every tier including WebGPU can run. The lighting pass reads through
+  one abstract surface-fetch interface; the **visibility buffer**
+  (instance+primitive ID, materials from bindless arrays) joins later
+  as a second, desktop-tier surface source alongside the GPU-driven
+  path below — same lighting, ~60 MB → ~8 MB geometry traffic at 1080p
+  under the strategy camera.
 * **Render graph:** the pass chain (shadow → G-buffer → lighting → post)
   is declared once as data; the graph schedules the passes, allocates and
   aliases their intermediate textures and manages transitions over the
