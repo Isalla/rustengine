@@ -6,9 +6,12 @@
 //! Tiefenscheiben. Jede Zelle (ein *Cluster*) trägt die Lichter, die sie
 //! schneiden; der Shader indiziert nur noch seinen eigenen Cluster.
 //!
-//! Dieser Kern liefert die Aufteilung und die Index-Mathematik —
-//! backend-neutral und headless testbar. Der GPU-Pass (Licht-Listen pro
-//! Cluster, Shadow-Atlas-Zuweisung) folgt mit der Pipeline.
+//! Dieser Kern liefert die Aufteilung, die Index-Mathematik und die
+//! CPU-Referenz des Licht-Cullings ([`cull_lights`]) — backend-neutral
+//! und headless testbar. Der GPU-Pass spiegelt [`cluster_view_aabb`] und
+//! die Kugel-AABB-Prüfung Kanal-für-Kanal.
+
+use glam::{Mat4, Vec3};
 
 /// Logarithmische Tiefen-Grenzen von `near` bis `far` (Länge `count + 1`).
 ///
@@ -140,6 +143,114 @@ impl ClusterGrid {
     }
 }
 
+// ── Licht-Culling (CPU-Referenz des Compute-Passes) ───────────────────
+//
+// Der GPU-Compute-Pass tut genau zwei Dinge: pro Cluster sein View-Raum-
+// AABB aufbauen (cluster_view_aabb) und jede Licht-Kugel dagegen testen
+// (sphere_intersects_aabb). Diese Funktionen sind 1:1 die CPU-Referenz —
+// der Compute-Shader muss dieselben Listen liefern (Index-für-Index).
+
+/// Ein Licht als Culling-Kugel (Punktlicht: Radius = Reichweite; Spot:
+/// Hüllkugel des Kegels).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SphereLight {
+    pub position: Vec3,
+    pub radius: f32,
+}
+
+impl SphereLight {
+    pub fn new(position: Vec3, radius: f32) -> Self {
+        Self { position, radius: radius.max(0.0) }
+    }
+}
+
+/// Das View-Raum-AABB des Clusters `(tile_x, tile_y, slice)`.
+///
+/// Der Cluster ist ein Sichtkörper-Zellfach: die Kachel spannt ihren NDC-
+/// x/y-Bereich (Kachel 0 = oben-links), die Scheibe die lineare Sichttiefe
+/// `near..far` (Kamera blickt die −Z entlang). Da die x/y-Ausdehnung mit
+/// der Tiefe wächst, wird das AABB über beide Scheiben-Tiefen genommen —
+/// konservativ, nie ein False Negative gegen die echte Zelle.
+///
+/// `proj` muss eine Standard-Perspektivmatrix sein (x_axis.x = cot(fov_x/2),
+/// y_axis.y = cot(fov_y/2)); entartete Werte → `None`.
+pub fn cluster_view_aabb(
+    grid: &ClusterGrid,
+    tile_x: u32,
+    tile_y: u32,
+    slice: u32,
+    proj: &Mat4,
+) -> Option<(Vec3, Vec3)> {
+    let a = proj.x_axis.x;
+    let b = proj.y_axis.y;
+    if a == 0.0 || b == 0.0 || !a.is_finite() || !b.is_finite() {
+        return None;
+    }
+    if tile_x >= grid.tiles_x || tile_y >= grid.tiles_y {
+        return None;
+    }
+    let (zn, zf) = grid.slice_bounds(slice)?;
+    // NDC-Spannweite der Kachel; y von oben (Kachel 0) nach unten.
+    let nx0 = 2.0 * tile_x as f32 / grid.tiles_x as f32 - 1.0;
+    let nx1 = 2.0 * (tile_x + 1) as f32 / grid.tiles_x as f32 - 1.0;
+    let ny1 = 1.0 - 2.0 * tile_y as f32 / grid.tiles_y as f32;
+    let ny0 = 1.0 - 2.0 * (tile_y + 1) as f32 / grid.tiles_y as f32;
+    // ndc_x = a·x/d ⇒ x = ndc_x·d/a (analog y); Sichttiefe d ⇒ z = −d.
+    let corner = |ndc_x: f32, ndc_y: f32, d: f32| Vec3::new(ndc_x * d / a, ndc_y * d / b, -d);
+    let mut mn = Vec3::splat(f32::MAX);
+    let mut mx = Vec3::splat(f32::MIN);
+    for (ex, ey) in [(nx0, ny0), (nx0, ny1), (nx1, ny0), (nx1, ny1)] {
+        for d in [zn, zf] {
+            let c = corner(ex, ey, d);
+            mn = mn.min(c);
+            mx = mx.max(c);
+        }
+    }
+    Some((mn, mx))
+}
+
+/// Konservative Kugel-AABB-Prüfung (Distanz zum nächstgelegenen Punkt).
+pub fn sphere_intersects_aabb(center: Vec3, radius: f32, min: Vec3, max: Vec3) -> bool {
+    let closest = center.clamp(min, max);
+    (closest - center).length_squared() <= radius * radius
+}
+
+/// CPU-Referenz des Licht-Culling-Passes: je Cluster die Indizes der
+/// erreichenden Lichter, aufsteigend — deterministisch.
+///
+/// Die Licht-Kugeln werden in den View-Raum transformiert (View ist
+/// starr ⇒ Radius bleibt) gegen [`cluster_view_aabb`] getestet — genau
+/// die Reihenfolge des Compute-Shaders. Ergebnis-Länge:
+/// `grid.cluster_count()`.
+pub fn cull_lights(
+    grid: &ClusterGrid,
+    view: &Mat4,
+    proj: &Mat4,
+    lights: &[SphereLight],
+) -> Vec<Vec<u32>> {
+    let view_lights: Vec<(Vec3, f32)> = lights
+        .iter()
+        .map(|l| (view.transform_point3(l.position), l.radius))
+        .collect();
+    let mut out = vec![Vec::new(); grid.cluster_count() as usize];
+    for z in 0..grid.slice_count() {
+        for y in 0..grid.tiles_y {
+            for x in 0..grid.tiles_x {
+                let Some((mn, mx)) = cluster_view_aabb(grid, x, y, z, proj) else {
+                    continue;
+                };
+                let cell = &mut out[grid.index(x, y, z) as usize];
+                for (li, (c, r)) in view_lights.iter().enumerate() {
+                    if sphere_intersects_aabb(*c, *r, mn, mx) {
+                        cell.push(li as u32);
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -224,8 +335,7 @@ mod tests {
         let g = ClusterGrid::for_render_size([100, 50], 10, 4, 1.0, 1000.0);
         assert_eq!((g.tiles_x, g.tiles_y), (10, 5));
         let tiefe = 1.0; // Scheibe 0
-        assert_eq!(g.locate(0, 0, 10, tiefe), Some(g.index(0, 0, 0)));
-        assert_eq!(g.locate(10, 0, 10, tiefe), Some(g.index(1, 0, 0)));
+        assert_eq!(g.locate(0, 0, 10, tiefe), Some(g.index(0, 0, 0)));        assert_eq!(g.locate(10, 0, 10, tiefe), Some(g.index(1, 0, 0)));
         assert_eq!(g.locate(0, 10, 10, tiefe), Some(g.index(0, 1, 0)));
         // Rand-Pixel (99,49) und darüber hinaus -> letzte Kachel.
         assert_eq!(g.locate(99, 49, 10, tiefe), Some(g.index(9, 4, 0)));
@@ -245,5 +355,130 @@ mod tests {
             assert_eq!((x, y), (1, 1), "Pixel (15,15) bei tile 10");
             assert_eq!(z, k as u32, "Scheibe bei Tiefe {d}");
         }
+    }
+
+    // ── Licht-Culling ──────────────────────────────────────────────────
+
+    /// Kamera: Identitäts-View, 90° fovy, Aspect 1, near 1, far 100.
+    fn test_camera() -> (Mat4, Mat4) {
+        (
+            Mat4::IDENTITY,
+            Mat4::perspective_rh(std::f32::consts::FRAC_PI_2, 1.0, 1.0, 100.0),
+        )
+    }
+
+    #[test]
+    fn cluster_aabb_waechst_mit_der_tiefe() {
+        let (view, proj) = test_camera();
+        let _ = view;
+        let g = ClusterGrid::new(1, 1, 4, 1.0, 100.0);
+        let (mn0, mx0) = cluster_view_aabb(&g, 0, 0, 0, &proj).unwrap();
+        let (mn3, mx3) = cluster_view_aabb(&g, 0, 0, 3, &proj).unwrap();
+        // Volle NDC-Breite: bei 90° fovy gilt x = ±d.
+        assert!(approx(mx0.x, g.slice_bounds(0).unwrap().1, 1e-3));
+        assert!(mn0.z < mx0.z && approx(mn0.z, -g.slice_bounds(0).unwrap().1, 1e-5));
+        assert!(mn3.x < mn0.x, "ferne Zelle auch nach links breiter");
+        assert!(mx3.x > mx0.x * 3.0, "ferne Zelle deutlich breiter");
+        // Z-Achse = Scheiben-Tiefen (negativ, Blick −Z).
+        let (zn, zf) = g.slice_bounds(2).unwrap();
+        let (mn, mx) = cluster_view_aabb(&g, 0, 0, 2, &proj).unwrap();
+        assert!(approx(mn.z, -zf, 1e-4) && approx(mx.z, -zn, 1e-4));
+    }
+
+    #[test]
+    fn kugel_aabb_grundfaelle() {
+        let (mn, mx) = (Vec3::splat(-1.0), Vec3::splat(1.0));
+        assert!(sphere_intersects_aabb(Vec3::ZERO, 0.1, mn, mx), "Innen");
+        assert!(sphere_intersects_aabb(Vec3::new(1.5, 0.0, 0.0), 0.5, mn, mx), "Berührt");
+        assert!(!sphere_intersects_aabb(Vec3::new(1.6, 0.0, 0.0), 0.5, mn, mx), "Außerhalb");
+        assert!(sphere_intersects_aabb(Vec3::new(3.0, 3.0, 0.0), 3.0, mn, mx), "Ecke aus der Ferne");
+    }
+
+    #[test]
+    fn zentrales_licht_nur_in_seiner_scheibe() {
+        let (view, proj) = test_camera();
+        let g = ClusterGrid::new(2, 2, 4, 1.0, 100.0);
+        // Tiefe 5: Scheiben [1, 3.16, 10, 31.6, 100] -> Scheibe 1.
+        let lights = [SphereLight::new(Vec3::new(0.0, 0.0, -5.0), 0.1)];
+        let lists = cull_lights(&g, &view, &proj, &lights);
+        for z in 0..4 {
+            for t in 0..4 {
+                let cell = &lists[g.index(t % 2, t / 2, z) as usize];
+                if z == 1 {
+                    // x=0/y=0 liegt auf der Kachelgrenze -> alle 4 Kacheln.
+                    assert!(cell.contains(&0), "Scheibe 1, Kachel {t} muss treffen");
+                } else {
+                    assert!(cell.is_empty(), "Scheibe {z}, Kachel {t} muss leer sein");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn licht_hinter_oder_neben_der_kamera_faellt_weg() {
+        let (view, proj) = test_camera();
+        let g = ClusterGrid::new(2, 2, 4, 1.0, 100.0);
+        let lights = [
+            SphereLight::new(Vec3::new(0.0, 0.0, 5.0), 0.5),  // dahinter
+            SphereLight::new(Vec3::new(50.0, 0.0, -5.0), 0.5), // weit rechts vorbei
+        ];
+        let lists = cull_lights(&g, &view, &proj, &lights);
+        assert!(lists.iter().all(|l| l.is_empty()), "beide müssen komplett weg sein");
+    }
+
+    #[test]
+    fn riesiges_licht_trifft_alle_cluster() {
+        let (view, proj) = test_camera();
+        let g = ClusterGrid::new(3, 3, 4, 1.0, 100.0);
+        let lights = [SphereLight::new(Vec3::new(0.0, 0.0, -30.0), 500.0)];
+        let lists = cull_lights(&g, &view, &proj, &lights);
+        assert_eq!(lists.len(), g.cluster_count() as usize);
+        assert!(lists.iter().all(|l| l == &vec![0]), "riesige Kugel schneidet alles");
+    }
+
+    #[test]
+    fn keine_false_negatives_konservativ_wie_die_gpu() {
+        let (view, proj) = test_camera();
+        let g = ClusterGrid::new(4, 4, 4, 1.0, 100.0);
+        // Tiefe 6 (Scheibe 1), NDC (-0.4, 0.4) -> Kachel x=1, y=1 (y von oben).
+        let d = 6.0;
+        let pos = Vec3::new(-0.4 * d, 0.4 * d, -d);
+        let lights = [SphereLight::new(pos, 0.05)];
+        let lists = cull_lights(&g, &view, &proj, &lights);
+        let hits: Vec<u32> = (0..g.cluster_count())
+            .filter(|&i| !lists[i as usize].is_empty())
+            .collect();
+        // Muss den Ziel-Cluster enthalten (kein False Negative)…
+        let target = g.index(1, 1, 1);
+        assert!(hits.contains(&target), "Ziel-Cluster fehlt: {hits:?}");
+        // …und darf wegen des konservativen AABBs (spannt beide Scheiben-
+        // Tiefen) Nachbar-Kacheln derselben Scheibe streifen — niemals
+        // aber eine andere Scheibe oder einen anderen Kachelblock.
+        for h in &hits {
+            let (x, y, z) = g.coords(*h).unwrap();
+            assert_eq!(z, 1, "Treffer in falscher Scheibe: {h}");
+            assert!((x as i32 - 1).abs() <= 1 && (y as i32 - 1).abs() <= 1, "Treffer zu weit weg: {h}");
+        }
+    }
+
+    #[test]
+    fn culling_ist_deterministisch_und_sortiert() {
+        let (view, proj) = test_camera();
+        let g = ClusterGrid::new(2, 2, 2, 1.0, 50.0);
+        let lights = [
+            SphereLight::new(Vec3::new(0.0, 0.0, -5.0), 2.0),
+            SphereLight::new(Vec3::new(0.2, 0.0, -5.2), 1.0),
+            SphereLight::new(Vec3::new(0.0, 0.0, -20.0), 3.0),
+        ];
+        let a = cull_lights(&g, &view, &proj, &lights);
+        let b = cull_lights(&g, &view, &proj, &lights);
+        assert_eq!(a, b, "zwei Läufe müssen identisch sein");
+        for l in &a {
+            let mut s = l.clone();
+            s.sort();
+            assert_eq!(l, &s, "Listen müssen aufsteigend sortiert sein");
+        }
+        // Licht 0 und 1 überschneiden sich -> gemeinsame Cluster mit [0,1].
+        assert!(a.iter().any(|l| l == &vec![0u32, 1]), "Überschneidung muss Liste [0,1] erzeugen");
     }
 }

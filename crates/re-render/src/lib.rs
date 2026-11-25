@@ -44,7 +44,9 @@ pub mod shadow;
 pub use backend::{DrawBatch, GfxBackend, GfxError, NullBackend, Sprite};
 pub use billboard::{billboard_matrix, unit_quad, uv_rect};
 pub use camera::Camera;
-pub use cluster::{log_z_bounds, ClusterGrid};
+pub use cluster::{
+    cluster_view_aabb, cull_lights, log_z_bounds, sphere_intersects_aabb, ClusterGrid, SphereLight,
+};
 pub use cull::{Frustum, HiZPyramid, Plane};
 pub use gbuffer::{
     octahedral_decode, octahedral_encode, pack_visibility_id, quantize_uv,
