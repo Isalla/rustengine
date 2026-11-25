@@ -1530,7 +1530,9 @@ dependencies = [
 name = "re-agent"
 version = "0.1.0"
 dependencies = [
+ "glam",
  "re-core",
+ "re-world",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
@@ -1551,6 +1553,24 @@ dependencies = [
 [[package]]
 name = "re-ecs"
 version = "0.1.0"
+
+[[package]]
+name = "re-editor"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "glam",
+ "image",
+ "re-agent",
+ "re-core",
+ "re-io",
+ "re-platform",
+ "re-render",
+ "re-wgpu",
+ "re-world",
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "re-io"
