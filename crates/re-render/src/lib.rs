@@ -21,6 +21,8 @@
 //! - [`gbuffer`] — oktaedrische Normalen-Kodierung und das
 //!   G-Buffer-Kanal-Layout als Daten (ADR-0003).
 //! - [`cull`]    — Frustum-Ebenen, Kugel/AABB-Tests, Hi-Z-Occlusion.
+//! - [`temporal`] — TAA-Referenz: Reprojektion, Box-Clamp, Akkumulation
+//!   (dieselbe Plumbing wie FSR 2/3 und DLSS).
 //!
 //! Geplante Backend-Module (je ein eigener Crate, ggf. eigenes Repo):
 //! - `re-wgpu`     (oeffentlich): Vulkan (Linux), DX11/DX12 (Windows),
@@ -40,6 +42,7 @@ pub mod gbuffer;
 pub mod hdr;
 pub mod jitter;
 pub mod shadow;
+pub mod temporal;
 
 pub use backend::{DrawBatch, GfxBackend, GfxError, NullBackend, Sprite};
 pub use billboard::{billboard_matrix, unit_quad, uv_rect};
@@ -59,3 +62,4 @@ pub use hdr::{
 };
 pub use jitter::{halton, JitterPattern};
 pub use shadow::{fit_cascade, CascadeFit, CascadeSetup};
+pub use temporal::{History, RgbBox, Taa};
