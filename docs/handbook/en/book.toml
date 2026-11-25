@@ -1,0 +1,14 @@
+[book]
+title = "RE Engine Handbook"
+description = "User handbook for the RE Rust game engine"
+authors = ["Waldemar Friesen"]
+language = "en"
+src = "src"
+
+[build]
+build-dir = "book"
+create-missing = false
+
+[output.html]
+git-repository-url = "https://github.com/Isalla/rustengine"
+edit-url-template = "https://github.com/Isalla/rustengine/edit/main/{path}"

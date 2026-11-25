@@ -1,0 +1,35 @@
+name: ci
+
+# Grün-Pflicht bei jedem Push/PR: Tests, warnungsfreies Rustdoc
+# (die Wiki-Ebenen leben von den Crate-Kommentaren) und der
+# Headless-Bau ohne Fenster-Feature (Pi/CI ohne Display).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build
+        run: cargo build --workspace
+
+      - name: Test
+        run: cargo test --workspace
+
+      - name: Rustdoc (warnings are errors)
+        env:
+          RUSTDOCFLAGS: "-D warnings"
+        run: cargo doc --workspace --no-deps
+
+      - name: Headless backend build
+        run: cargo build -p re-wgpu --no-default-features

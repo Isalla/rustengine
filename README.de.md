@@ -61,6 +61,18 @@ cargo test --workspace
 Headless-Builds ohne Fenster-Bibliotheken:
 `cargo build -p re-wgpu --no-default-features`.
 
+## Doku
+
+Bei jedem Push aus diesem Repo veröffentlicht (GitHub Pages):
+
+- **Nutzer-Handbuch:** <https://isalla.github.io/rustengine/handbook/de/> —
+  [English](https://isalla.github.io/rustengine/handbook/en/)
+- **API-Referenz (Rustdoc):** <https://isalla.github.io/rustengine/rustdoc/>
+- **Startseite:** <https://isalla.github.io/rustengine/>
+
+Quellen: Handbuch-Markdown in `docs/handbook/{en,de}`, API-Doku aus den
+Crate-Kommentaren selbst (`cargo doc --workspace`).
+
 ## Architektur-Prinzipien
 
 - **Eine Shader-Quelle.** Alle Pipeline-Varianten laufen auf WGSL über
@@ -83,7 +95,7 @@ Die lebende Checkliste mit jedem Unterpunkt: [docs/roadmap.de.md](docs/roadmap.d
 - **M1** — `re-render` + `re-wgpu`: Szenen mit glTF-Texturen rendern (Offscreen) ✅
 - **M2** — `re-platform`: Fenster, Eingabe, Delta-Time, Surface-Rendering ✅
 - **M3** — ECS + Welt-Streaming ✅ (`re-ecs` + `re-world`: Raster, Clipmap, Tiers, asynchrone IO-Pipeline, GPU-Handoff, HLOD, IO-Telemetrie, Ego-Übergabe, Welt-Werkzeuge für Agenten)
-- **Wiki** — Doku in drei Stufen: Rustdoc auf GitHub Pages (automatisch aus den Crate-Docs), Nutzer-Handbuch EN/DE (mdBook), API-Browser im Editor (auf Basis von `cargo rustdoc --output-format json`, geteiltes Registry-Konzept mit dem Agenten-Kern)
+- **Wiki** — Doku in drei Stufen 🟡: Rustdoc auf GitHub Pages ✅, Nutzer-Handbuch EN/DE als mdBook ✅, API-Browser im Editor (M4)
 - **M4** — Editor: Szenen-View, Outliner, Inspector, Import-Pipelines, Undo
 - **M5** — Render-Pipeline V2: Deferred HDR, Schatten 2.0, Upscaling-Adapter (FSR/XeSS/DLSS) ([docs/rendering.de.md](docs/rendering.de.md))
 - **M6** — Dynamische GI und Reflexionen: Lumen-artiger Software-RT-Pfad, Hardware-RT optional

@@ -1,0 +1,61 @@
+name: docs
+
+# Wiki-Ebene 1 + 2: Rustdoc aus den Crate-Docs, Handbuch EN/DE aus
+# mdBook — beides bei jedem Push auf main neu gebaut und als GitHub
+# Pages ausgeliefert (Landing: www/index.html).
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Rustdoc (workspace)
+        run: cargo doc --workspace --no-deps
+
+      - name: Install mdBook
+        run: cargo install mdbook --locked --version "^0.4"
+
+      - name: Handbook EN
+        run: mdbook build docs/handbook/en -d "$GITHUB_WORKSPACE/_site/handbook/en"
+
+      - name: Handbook DE
+        run: mdbook build docs/handbook/de -d "$GITHUB_WORKSPACE/_site/handbook/de"
+
+      - name: Assemble site
+        run: |
+          mkdir -p _site/rustdoc
+          cp -r target/doc/* _site/rustdoc/
+          cp www/index.html _site/index.html
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-24.04
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

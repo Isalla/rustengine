@@ -60,6 +60,18 @@ cargo test --workspace
 Headless builds without window libraries:
 `cargo build -p re-wgpu --no-default-features`.
 
+## Documentation
+
+Published from this repo on every push (GitHub Pages):
+
+- **User handbook:** <https://isalla.github.io/rustengine/handbook/en/> —
+  [Deutsch](https://isalla.github.io/rustengine/handbook/de/)
+- **API reference (rustdoc):** <https://isalla.github.io/rustengine/rustdoc/>
+- **Landing page:** <https://isalla.github.io/rustengine/>
+
+Sources: handbook markdown in `docs/handbook/{en,de}`, API docs from the
+crate comments themselves (`cargo doc --workspace`).
+
 ## Architecture principles
 
 - **One shader source.** All pipeline variants run on WGSL through wgpu;
@@ -83,7 +95,7 @@ The living checklist with every sub-item: [docs/roadmap.md](docs/roadmap.md).
 - **M1** — `re-render` + `re-wgpu`: render scenes with glTF textures (offscreen) ✅
 - **M2** — `re-platform`: windows, input, delta time, surface rendering ✅
 - **M3** — ECS + world streaming ✅ (`re-ecs` + `re-world`: grid, clipmap, tiers, async IO pipeline, GPU handoff, HLOD, IO telemetry, first-person handoff, agent world tools)
-- **Wiki** — documentation in three layers: rustdoc on GitHub Pages (built from the crate docs), user handbook EN/DE (mdBook), API browser inside the editor (fed by `cargo rustdoc --output-format json`, sharing the registry idea with the agent core)
+- **Wiki** — documentation in three layers 🟡: rustdoc on GitHub Pages ✅, user handbook EN/DE as mdBook ✅, API browser inside the editor (M4)
 - **M4** — editor: scene view, outliner, inspector, import pipelines, undo
 - **M5** — render pipeline V2: deferred HDR, shadows 2.0, upscaling adapters (FSR/XeSS/DLSS) ([docs/rendering.md](docs/rendering.md))
 - **M6** — dynamic GI and reflections: Lumen-style software ray-tracing path, hardware RT optional

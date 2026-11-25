@@ -174,10 +174,10 @@ normale Assets — der Simulationskern bleibt deterministisch)**
 - [ ] Generierungs-Telemetrie: Kosten-/Latenz-Buchführung pro
       Werkzeugaufruf, damit ein Agenten-Lauf gedeckelt und prüfbar ist
 
-## Wiki — Doku in drei Stufen ⬜
+## Wiki — Doku in drei Stufen 🟡
 
-- [ ] Rustdoc auf GitHub Pages, automatisch bei jedem Push
-- [ ] Nutzer-Handbuch EN/DE als mdBook
+- [x] Rustdoc auf GitHub Pages, automatisch bei jedem Push (`.github/workflows/docs.yml`)
+- [x] Nutzer-Handbuch EN/DE als mdBook (`docs/handbook/{en,de}`)
 - [ ] API-Browser im Editor (`cargo rustdoc --output-format json`,
       geteiltes Registry-Konzept mit den Agenten-Capabilities)
 

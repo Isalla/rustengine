@@ -167,10 +167,10 @@ normal assets — the simulation core stays deterministic)**
 - [ ] Generation telemetry: cost/latency accounting per tool call so
       an agent run can be capped and audited
 
-## Wiki — documentation in three layers ⬜
+## Wiki — documentation in three layers 🟡
 
-- [ ] rustdoc on GitHub Pages, rebuilt on every push
-- [ ] User handbook EN/DE as mdBook
+- [x] rustdoc on GitHub Pages, rebuilt on every push (`.github/workflows/docs.yml`)
+- [x] User handbook EN/DE as mdBook (`docs/handbook/{en,de}`)
 - [ ] API browser inside the editor (`cargo rustdoc --output-format
       json` feeding the same registry idea as the agent capabilities)
 
