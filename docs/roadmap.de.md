@@ -65,8 +65,10 @@ mit ehrlichem Haken-Stand. ✅ fertig und testabgedeckt · 🟡 teilweise gebaut
 - [x] **M3d** HLOD: vorgebackene Fernfeld-Meshes am Clipmap-Rand
       (`re-world::hlod` — Cluster-Registrierung, Übernahmezone mit
       Hysterese, Fade-out; demonstriert von `stream-demo`)
-- [ ] **M3e** Ego-Übergabe: Steuerungsübergabe mitten im Flug ohne
-      Szenen-Neuaufbau
+- [x] **M3e** Ego-Übergabe: Steuerungsübergabe mitten im Flug ohne
+      Szenen-Neuaufbau (`re-world::ego` — geglättete Kamera-Überblendung,
+      Eingabe-Besitz, Welt-Streaming unberührt; demonstriert von
+      `stream-demo`)
 - [x] IO-Telemetrie: gemessene Lade-Latenz und Durchsatz treiben
       Tier-Hysterese und Verweilzeit adaptiv (langsame Platte →
       frühere Abwertung)
@@ -191,6 +193,8 @@ ist das erste Testprojekt; Shooter und MMO folgen.*
       Freigabe (`re-world::handoff`, `re-wgpu`)
 - [x] Fernfeld-HLOD am Clipmap-Rand (M3d)
 - [x] IO-Telemetrie & adaptive Stufenregel (`re-world::telemetry`)
+- [x] Strategie-↔Ego-Übergabe mitten im Flug ohne Szenen-Neuaufbau
+      (`re-world::ego`)
 - [ ] Kamera- & Timeline-Layer ([cinema.de](cinema.de.md))
 - [ ] Steuerungs-Übergabe (M3e)
 - [ ] Erster spielbarer Rundflug: RTS-Vertikalschnitt durch alles

@@ -34,6 +34,7 @@
 //!   Scheduler zählt nur Frames, der echte Upload steckt im Backend.
 
 pub mod clipmap;
+pub mod ego;
 pub mod grid;
 pub mod handoff;
 pub mod hlod;
@@ -44,6 +45,7 @@ pub mod telemetry;
 pub mod tier;
 
 pub use clipmap::{ClipDiff, Clipmap, ClipmapConfig};
+pub use ego::{ControlMode, EgoConfig, EgoHandoff, HandoffEvent, InputOwner};
 pub use grid::CellKey;
 pub use hlod::{HlodCell, HlodConfig, HlodDelta, HlodSet};
 pub use handoff::{CellHandoff, GpuUpload, HandoffConfig, HandoffStats};

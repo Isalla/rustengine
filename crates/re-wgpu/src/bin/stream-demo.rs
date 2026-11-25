@@ -33,8 +33,9 @@ use re_core::mesh::Mesh;
 use re_render::{Camera, DrawBatch, GfxBackend, GfxError};
 use re_wgpu::WgpuBackend;
 use re_world::{
-    AsyncSource, CellCodec, CellHandoff, CellKey, Clipmap, ClipmapConfig, FileStore, GpuUpload,
-    HandoffConfig, HlodCell, HlodConfig, HlodSet, Priority, StreamConfig, Streamer,
+    AsyncSource, CellCodec, CellHandoff, CellKey, Clipmap, ClipmapConfig, EgoConfig, EgoHandoff,
+    FileStore, GpuUpload, HandoffConfig, HlodCell, HlodConfig, HlodSet, Priority, StreamConfig,
+    Streamer,
 };
 
 /// Kantenlänge der feinsten Zelle, in Metern.
@@ -84,6 +85,20 @@ fn hlod_quad() -> Mesh {
     mesh.positions = vec![[-0.5, 0.0, -0.5], [0.5, 0.0, -0.5], [0.5, 0.0, 0.5], [-0.5, 0.0, 0.5]];
     mesh.normals = Some(vec![[0.0, 1.0, 0.0]; 4]);
     mesh.indices = Some(vec![0, 1, 2, 0, 2, 3]);
+    mesh
+}
+
+/// Avatar-Marker für den Ego-Handoff: zwei gekreuzte, hochkante Quadrate —
+// von jeder Flugrichtung als heller Strich am Boden sichtbar.
+fn avatar_cross() -> Mesh {
+    let mut mesh = Mesh::default();
+    mesh.name = "avatar".into();
+    mesh.positions = vec![
+        [-1.2, 0.0, 0.0], [1.2, 0.0, 0.0], [1.2, 3.4, 0.0], [-1.2, 3.4, 0.0],
+        [0.0, 0.0, -1.2], [0.0, 0.0, 1.2], [0.0, 3.4, 1.2], [0.0, 3.4, -1.2],
+    ];
+    mesh.normals = Some(vec![[0.0, 0.0, 1.0]; 8]);
+    mesh.indices = Some(vec![0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7]);
     mesh
 }
 
@@ -404,21 +419,76 @@ fn main() -> Result<()> {
     let mut hlod_shown_total = 0usize;
     let mut hlod_hidden_total = 0usize;
 
-    for _frame in 0..frames {
+    // Ego-Übergabe (M3e): Ein Avatar wandert den Korridor entlang; ab
+    // ATTACH_FRAME gleitet die Kamera von der Strategieflugbahn an ihn
+    // heran und folgt ihm in Augenhöhe. Die Welt (Clipmap, Streamer,
+    // HLOD) läuft dabei unverändert weiter — kein Szenen-Neuaufbau.
+    const AVATAR_SPEED: f64 = 6.0; // m/s Schritttempo
+    let attach_frame = (frames / 3).max(60);
+    let mut rig = EgoHandoff::new(EgoConfig { duration: 1.0 }, Vec2::ZERO);
+    let mut avatar = Vec2::new(
+        (attach_frame as f64 * dt * SPEED - 30.0) as f32,
+        (attach_frame as f64 * dt * 0.13).sin() as f32 * 160.0,
+    );
+    let mut prev_strategy = Vec2::ZERO;
+    let mut ego_frames = 0usize;
+    let avatar_mesh = avatar_cross();
+    let avatar_material = Material {
+        name: String::new(),
+        base_color: [1.0, 0.62, 0.12, 1.0],
+        metallic: 0.0,
+        roughness: 0.7,
+        emissive: [0.85, 0.42, 0.04],
+        double_sided: true,
+        albedo_texture_id: None,
+        normal_texture_id: None,
+    };
+
+    for frame in 0..frames {
         now += dt;
-        // Flug: SPEED in X, sanfte Wellenlinie in Z, 45 m über Grund.
-        let px = now * SPEED;
-        let pz = (now * 0.13).sin() * 160.0;
-        let ground = height_at(px, pz);
-        let eye = Vec3::new(px as f32, ground + 45.0, pz as f32);
+        // Strategie-Flugbahn (Prozedur): SPEED in X, sanfte Welle in Z.
+        // Der Rig führt sie als Anker weiter, damit eine spätere Rückgabe
+        // den Blick exakt dort fortsetzt, wo die Kamera herkam.
+        let sx = now * SPEED;
+        let sz = (now * 0.13).sin() * 160.0;
+        let strategy = Vec2::new(sx as f32, sz as f32);
+        rig.move_anchor(strategy - prev_strategy);
+        prev_strategy = strategy;
+        // Avatar-Schritt (Spiellogik) und Übergabe zur Hälfte des Flugs.
+        avatar += Vec2::new((AVATAR_SPEED * dt) as f32, 0.0);
+        rig.set_unit_position(avatar);
+        if frame == attach_frame {
+            rig.attach();
+        }
+        rig.update(dt);
+        let b = rig.ego_blend();
+        if b > 0.999 {
+            ego_frames += 1;
+        }
+        // Kamerapunkt vom Rig (stetige Blende), Höhe weich überblendet:
+        // 45 m Übersicht → 1.7 m Augenhöhe.
+        let cam2 = rig.camera();
+        let s_ground = height_at(sx, sz) + 45.0;
+        let e_ground = height_at(cam2.x as f64, cam2.y as f64) + 1.7;
+        let eye = Vec3::new(
+            cam2.x,
+            s_ground as f32 + (e_ground as f32 - s_ground as f32) * b,
+            cam2.y,
+        );
         let ahead = now + 1.2;
         let ax = ahead * SPEED;
         let az = (ahead * 0.13).sin() * 160.0;
-        let look = Vec3::new(ax as f32, height_at(ax, az) + 4.0, az as f32);
+        let s_look = Vec3::new(ax as f32, height_at(ax, az) + 4.0, az as f32);
+        let e_look = Vec3::new(
+            cam2.x + 30.0,
+            height_at((cam2.x + 30.0) as f64, cam2.y as f64) + 1.5,
+            cam2.y,
+        );
+        let look = s_look.lerp(e_look, b);
         camera.view = Mat4::look_at_rh(eye, look, Vec3::Y);
 
-        clip.set_center(Vec2::new(px as f32, pz as f32));
-        if let Some(hd) = hlod.update(Vec2::new(px as f32, pz as f32)) {
+        clip.set_center(cam2);
+        if let Some(hd) = hlod.update(cam2) {
             hlod_shown_total += hd.shown.len();
             hlod_hidden_total += hd.hidden.len();
         }
@@ -479,7 +549,33 @@ fn main() -> Result<()> {
                 cell: None,
             });
         }
+        // Avatar-Marker: heller Kreuzstab, damit die Ego-Kamera im Bild
+        // ihre eigene Einheit sieht.
+        {
+            let a_ground = height_at(avatar.x as f64, avatar.y as f64);
+            batches.push(DrawBatch {
+                mesh: &avatar_mesh,
+                material: &avatar_material,
+                world: Mat4::from_translation(Vec3::new(avatar.x, a_ground, avatar.y)),
+                sprite: None,
+                cell: None,
+            });
+        }
         exec.backend.render(&camera, &batches)?;
+        // Beweisbild mitten in der Blende (75 % Ego): Übergang sichtbar.
+        if frame == attach_frame + 45 {
+            let (mw, mh, mrgba) = exec.backend.readback_rgba()?;
+            let mid = out_path.with_file_name(format!(
+                "{}-ego-mitte.png",
+                out_path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default()
+            ));
+            if let Some(parent) = mid.parent() {
+                std::fs::create_dir_all(parent).ok();
+            }
+            if let Some(img) = RgbaImage::from_raw(mw, mh, mrgba) {
+                img.save(&mid).ok();
+            }
+        }
     }
 
     let stats = handoff.stats();
@@ -511,6 +607,13 @@ fn main() -> Result<()> {
         telem.latency_ewma() * 1000.0,
         telem.throughput_ewma() / (1024.0 * 1024.0),
         telem.health(),
+    );
+    println!(
+        "Ego-Handoff: Attach bei Frame {}, Blende 1.0 s, {} Frames in Ego-Höhe \
+         (Modus {:?}) — Welt ohne Neuaufbau weitergestreamt",
+        attach_frame,
+        ego_frames,
+        rig.mode(),
     );
     println!(
         "Pipeline am Ende: pending={} filling={} inflight={} — Upload-Kontingent 4 MiB/Frame",

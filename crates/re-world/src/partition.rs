@@ -180,6 +180,19 @@ impl<S: CellSource> WorldPartition<S> {
         self.instances.get(id).map(|i| i.tier.tier)
     }
 
+    /// Positionsführung von außen (Bewegung, Physik, Ego-Handoff):
+    /// Instanz umsetzen; die Stufenneubewertung passiert im nächsten
+    /// [`update`](Self::update). `false` bei ungültigem Index.
+    pub fn set_instance_position(&mut self, id: usize, position: Vec2) -> bool {
+        match self.instances.get_mut(id) {
+            Some(inst) => {
+                inst.position = position;
+                true
+            }
+            None => false,
+        }
+    }
+
     /// Ein Frame: Clipmap nachziehen, Streaming treiben, Stufen rechnen.
     ///
     /// Die Reihenfolge ist Teil der Determinismus-Zusage: erst Zellen,
