@@ -26,8 +26,10 @@ pub mod agent;
 pub mod capability;
 pub mod context;
 pub mod provider;
+pub mod world;
 
 pub use agent::{run_agent, AgentError};
 pub use capability::{CapabilityError, CapabilityRegistry, ToolSpec};
 pub use context::SceneDigest;
 pub use provider::{AiProvider, AssistantTurn, ChatMessage, ChatRequest, ProviderConfig, ProviderKind, Role, ToolCall};
+pub use world::{SharedWorld, WorldSession, register_world_tools};

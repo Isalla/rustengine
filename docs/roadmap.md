@@ -41,7 +41,7 @@ honest state of repair. ✅ done and test-covered · 🟡 partially built ·
 - [x] Windows, input, event loop, delta time (`re-platform`/winit)
 - [x] Headless mode — every layer testable without a display
 
-## M3 — ECS & world streaming 🟡 ← current focus
+## M3 — ECS & world streaming ✅
 
 - [x] **M3a** Entity-component-system: generation handles, sparse-set
       storage, system schedule (`re-ecs`)
@@ -69,10 +69,11 @@ honest state of repair. ✅ done and test-covered · 🟡 partially built ·
       ownership, world streaming untouched; demonstrated by `stream-demo`)
 - [x] IO telemetry: measured load latency/throughput drives tier
       hysteresis and dwell adaptively (slow disk → degrade earlier)
-- [ ] MCP tools: agent-facing capability bindings for streaming and
-      scene queries (builds on the `re-agent` registry scaffold)
+- [x] MCP tools: agent-facing capability bindings for streaming and
+      scene queries (`re-agent::world` — world/cell/instance tools on the
+      shared `WorldPartition`, same registry the editor uses)
 
-## M4 — Editor ⬜
+## M4 — Editor ⬜ ← current focus
 
 - [ ] Scene view with live camera into the streaming world
 - [ ] Outliner & inspector over the ECS
@@ -188,8 +189,9 @@ MMO. The RTS is the first test project; shooter and MMO follow.*
 - [x] IO telemetry & adaptive tier rules (`re-world::telemetry`)
 - [x] Strategy ↔ first-person handoff mid-flight, no scene rebuild
       (`re-world::ego`)
+- [x] Agent-facing world tools: streaming & scene queries on the shared
+      capability registry (`re-agent::world`)
 - [ ] Camera & timeline layer ([cinema](cinema.md))
-- [ ] Control handoff (M3e)
 - [ ] First playable: RTS vertical slice exercising the full round trip
 
 ---

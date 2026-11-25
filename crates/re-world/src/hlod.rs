@@ -146,6 +146,14 @@ impl HlodSet {
         self.clusters.contains_key(&cell)
     }
 
+    /// Alle registrierten Cluster, deterministisch sortiert nach `(x, y)`
+    /// (für Abfragen und Agent-Antworten).
+    pub fn cells(&self) -> Vec<HlodCell> {
+        let mut out: Vec<HlodCell> = self.clusters.keys().copied().collect();
+        out.sort_by_key(|c| (c.x, c.y));
+        out
+    }
+
     /// Cluster aus dem Bake eintragen; `source_cells` = Zahl der
     /// zusammengefassten Fein-Zellen. Erneutes Registrieren überschreibt
     /// nur die Zellzahl, nie den Sichtbarkeitszustand.

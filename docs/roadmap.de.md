@@ -41,7 +41,7 @@ mit ehrlichem Haken-Stand. ✅ fertig und testabgedeckt · 🟡 teilweise gebaut
 - [x] Fenster, Eingabe, Event-Loop, Delta-Zeit (`re-platform`/winit)
 - [x] Headless-Modus — jede Schicht ohne Display testbar
 
-## M3 — ECS & Welt-Streaming 🟡 ← aktueller Fokus
+## M3 — ECS & Welt-Streaming ✅
 
 - [x] **M3a** Entity-Component-System: Generations-Handles, Sparse-Set-
       Speicher, System-Schedule (`re-ecs`)
@@ -72,10 +72,11 @@ mit ehrlichem Haken-Stand. ✅ fertig und testabgedeckt · 🟡 teilweise gebaut
 - [x] IO-Telemetrie: gemessene Lade-Latenz und Durchsatz treiben
       Tier-Hysterese und Verweilzeit adaptiv (langsame Platte →
       frühere Abwertung)
-- [ ] MCP-Werkzeuge: Agenten-Zugriff auf Streaming und Szenen-Abfragen
-      (auf Basis der Capability-Registry aus `re-agent`)
+- [x] MCP-Werkzeuge: Agenten-Zugriff auf Streaming und Szenen-Abfragen
+      (`re-agent::world` — Welt-/Zell-/Instanz-Werkzeuge auf der geteilten
+      `WorldPartition`, dieselbe Registry wie der Editor)
 
-## M4 — Editor ⬜
+## M4 — Editor ⬜ ← aktueller Fokus
 
 - [ ] Szenen-Ansicht mit live Kamera in die streamende Welt
 - [ ] Outliner & Inspector über der ECS
@@ -195,8 +196,9 @@ ist das erste Testprojekt; Shooter und MMO folgen.*
 - [x] IO-Telemetrie & adaptive Stufenregel (`re-world::telemetry`)
 - [x] Strategie-↔Ego-Übergabe mitten im Flug ohne Szenen-Neuaufbau
       (`re-world::ego`)
+- [x] Welt-Werkzeuge für Agenten: Streaming- und Szenen-Abfragen auf der
+      geteilten Capability-Registry (`re-agent::world`)
 - [ ] Kamera- & Timeline-Layer ([cinema.de](cinema.de.md))
-- [ ] Steuerungs-Übergabe (M3e)
 - [ ] Erster spielbarer Rundflug: RTS-Vertikalschnitt durch alles
 
 ---

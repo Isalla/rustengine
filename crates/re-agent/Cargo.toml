@@ -6,6 +6,8 @@ license.workspace = true
 
 [dependencies]
 re-core.workspace = true
+re-world.workspace = true
+glam.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
