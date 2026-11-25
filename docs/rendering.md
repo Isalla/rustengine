@@ -58,6 +58,28 @@ playable — even in the browser.
 * SMAA + optional TAA; everything in WGSL over wgpu. Debug path:
   RenderDoc frame capture works out of the box on the native
   Vulkan/DX12/Metal paths.
+* **TAA quality doctrine (product requirement: no blur, no ghosts).**
+  TAA is the pass where sloppy work is paid for twice — too much
+  accumulation makes ghosts, too hard a clamp makes mush. Binding
+  rules for the GPU implementation (CPU reference:
+  `re-render::temporal`):
+  * Cap the accumulation window (≤ 8–16 effective samples) and reset
+    fully on disocclusion — an unbounded history is blur source no. 1.
+  * History fetch must not blur: dithered or bicubic resampling, never
+    plain bilinear (double-blur is the classic TAA mush).
+  * Clamp in YCoCg with a variance box plus extension toward the
+    history (Jimenez 2014) — hard RGB boxes shimmer on contrast edges.
+  * Velocity must be sub-pixel accurate (object + camera motion,
+    reverse Z); wrong velocity ghosts in a way no clamp can hide.
+  * A sharpening pass (CAS-style) after the temporal resolve restores
+    edge contrast — sharpening belongs to TAA, not to the optional
+    extras.
+  * Quality gates before any TAA version ships: reference scenes
+    (pan, rotation, fine geometry — fence/grass/powerline) measured
+    against a supersampled ground truth; no ghost pixels above a
+    delta threshold, sharpness within a few percent of the ground
+    truth. The concrete numbers are set by the first implementation
+    and stay in this file.
 * **Upscaling adapter (`re-upscale`)** — trait, backends as modules:
   * `Nis`/`Easu`-style spatial upscaler (everywhere, required fallback)
   * **FSR 2/3** (temporal + frame generation): AMD ships MIT-licensed

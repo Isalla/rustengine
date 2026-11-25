@@ -60,6 +60,31 @@ unten immer spielbar — auch im Browser.
 * SMAA + optionales TAA; alles in WGSL über wgpu. Debug-Pfad:
   RenderDoc-Frame-Capture funktioniert auf den nativen
   Vulkan/DX12/Metal-Pfaden ohne Zusatzarbeit.
+* **TAA-Qualitäts-Doktrin (Produkt-Anforderung: kein Brei, keine
+  Geister).** TAA ist der Pass, den schlampige Umsetzung doppelt
+  bezahlt: zu viel Akkumulation macht Geister, zu hartes Klemmen macht
+  Brei. Bindende Regeln für die GPU-Implementierung (CPU-Referenz:
+  `re-render::temporal`):
+  * Akkumulationsfenster begrenzen (≤ 8–16 wirksame Samples) und bei
+    Disokklusion vollständig zurücksetzen — eine unendliche History
+    ist Blur-Quelle Nr. 1.
+  * History-Zugriff darf nicht verwischen: gedithelter oder
+    bikubischer Sample, nie pauschal bilinear (Doppel-Verwischung ist
+    der klassische TAA-Brei).
+  * Klemmen in YCoCg mit Variance-Box plus Dehnung zur History
+    (Jimenez 2014) — harte RGB-Boxen shimmern an Kontrastkanten.
+  * Velocity muss subpixelgenau sein (Objekt- plus Kamerabewegung,
+    Reverse Z); falsche Velocity geistert auf eine Art, die kein
+    Clamp verstecken kann.
+  * Ein Schärfen-Pass (CAS-Art) nach dem temporalen Resolve stellt
+    den Kantenkontrast wieder her — Schärfen gehört zur TAA, nicht zu
+    den optionalen Extras.
+  * Qualitäts-Gates, bevor eine TAA-Version erscheint: auf
+    Referenzszenen (Schwenk, Rotation, feine Geometrie — Zaun/Gras/
+    Stromleitung) gegen supersampled Ground Truth gemessen; keine
+    Ghost-Pixel über Schwellwert, Schärfe innerhalb weniger Prozent
+    der Ground Truth. Die konkreten Zahlen setzt die erste
+    Implementierung, sie bleiben in dieser Datei stehen.
 * **Upscaling-Adapter (`re-upscale`)** — Trait, Backends als Module:
   * `Nis`/`Easu`-artiger räumlicher Upscaler (überall, Pflicht-Fallback)
   * **FSR 2/3** (zeitlich + Frame Generation): AMD liefert MIT-lizenzierte
