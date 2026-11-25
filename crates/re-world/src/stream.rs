@@ -21,6 +21,7 @@
 use std::collections::HashMap;
 
 use crate::grid::CellKey;
+use crate::telemetry::IoTelemetry;
 
 /// Lade-Priorität: kleinere Werte zuerst — (Ebene, Abstand in
 /// Basiszellen). Total sortierbar; bei Gleichstand treten immer die
@@ -119,6 +120,9 @@ struct Slot {
     bytes: u64,
     /// Weltzeit der letzten Nutzung als nachgefragte Zelle (LRU).
     last_use: f64,
+    /// Weltzeit des `start` (nur für `Loading` gesetzt) — zusammen mit
+    /// dem Fertig-Zeitpunkt die Latenz-Messung für die Telemetrie.
+    started_at: f64,
 }
 
 /// Verwaltung aller Zell-Zustände (siehe Modul-Doku).
@@ -129,6 +133,7 @@ pub struct Streamer<S: CellSource> {
     demand: HashMap<CellKey, Priority>,
     resident_bytes: u64,
     now: f64,
+    telemetry: IoTelemetry,
 }
 
 impl<S: CellSource> Streamer<S> {
@@ -140,6 +145,7 @@ impl<S: CellSource> Streamer<S> {
             demand: HashMap::new(),
             resident_bytes: 0,
             now: 0.0,
+            telemetry: IoTelemetry::default(),
         }
     }
 
@@ -163,6 +169,12 @@ impl<S: CellSource> Streamer<S> {
     /// [`drive`](Self::drive) desselben Frames.
     pub fn set_now(&mut self, now: f64) {
         self.now = now;
+    }
+
+    /// IO-Telemetrie dieses Streamers: gemessene Latenz/Durchsatz und
+    /// die daraus abgeleitete Gesundheit (siehe [`crate::telemetry`]).
+    pub fn telemetry(&self) -> &IoTelemetry {
+        &self.telemetry
     }
 
     pub fn config(&self) -> &StreamConfig {
@@ -211,6 +223,7 @@ impl<S: CellSource> Streamer<S> {
                             state: SlotState::Queued,
                             bytes: 0,
                             last_use: self.now,
+                            started_at: self.now,
                         },
                     );
                 }
@@ -256,10 +269,17 @@ impl<S: CellSource> Streamer<S> {
                 PollResult::Pending => {}
                 PollResult::Failed => {
                     self.slots.remove(&k);
+                    self.telemetry.record_failure();
                     delta.failed.push(k);
                 }
                 PollResult::Ready { payload, bytes } => {
-                    self.slots.remove(&k);
+                    // remove liefert die Startzeit → Latenz-Messung.
+                    let started = self
+                        .slots
+                        .remove(&k)
+                        .map(|s| s.started_at)
+                        .unwrap_or(self.now);
+                    self.telemetry.record_load(self.now - started, bytes);
                     if bytes > self.cfg.budget_bytes {
                         // Passt niemals ins Budget — ehrlich als Fehler.
                         delta.failed.push(k);
@@ -272,6 +292,7 @@ impl<S: CellSource> Streamer<S> {
                             state: SlotState::Ready,
                             bytes,
                             last_use: self.now,
+                            started_at: started,
                         },
                     );
                     self.resident_bytes += bytes;
@@ -301,10 +322,12 @@ impl<S: CellSource> Streamer<S> {
                     // aus der Nachfrage fiel), auf Loading stellen.
                     if let Some(s) = self.slots.get_mut(&k) {
                         s.state = SlotState::Loading;
+                        s.started_at = self.now;
                     }
                 }
                 Err(LoadError::Unsupported) => {
                     self.slots.remove(&k);
+                    self.telemetry.record_failure();
                     delta.failed.push(k);
                 }
             }

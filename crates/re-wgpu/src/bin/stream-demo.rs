@@ -502,6 +502,16 @@ fn main() -> Result<()> {
         hlod_hidden_total,
         hlod.shown().len()
     );
+    let telem = streamer.telemetry();
+    println!(
+        "IO-Telemetrie: {} Lasten, {} Fehler, Latenz Ø {:.1} ms, \
+         Durchsatz Ø {:.1} MiB/s, Gesundheit {:.2}",
+        telem.samples(),
+        telem.failures(),
+        telem.latency_ewma() * 1000.0,
+        telem.throughput_ewma() / (1024.0 * 1024.0),
+        telem.health(),
+    );
     println!(
         "Pipeline am Ende: pending={} filling={} inflight={} — Upload-Kontingent 4 MiB/Frame",
         stats.pending, stats.filling, stats.inflight

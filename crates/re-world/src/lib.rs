@@ -40,6 +40,7 @@ pub mod hlod;
 pub mod io;
 pub mod partition;
 pub mod stream;
+pub mod telemetry;
 pub mod tier;
 
 pub use clipmap::{ClipDiff, Clipmap, ClipmapConfig};
@@ -52,4 +53,5 @@ pub use stream::{
     CellSource, LoadError, MockSource, PollResult, Priority, SlotState, StreamConfig, StreamDelta,
     Streamer,
 };
+pub use telemetry::{IoTelemetry, TelemetryConfig};
 pub use tier::{Tier, TierPolicy, TierState};

@@ -34,6 +34,10 @@ pub struct PartitionConfig {
     pub clipmap: ClipmapConfig,
     pub stream: StreamConfig,
     pub tiers: TierPolicy,
+    /// Stufenregel an die gemessene IO-Lage anpassen (siehe
+    /// [`crate::telemetry`]): langsame Platte → frühere Abwertung, mehr
+    /// Hysterese, längere Verweilzeit. Aus = [`Self::tiers`] unverändert.
+    pub tiers_adaptive: bool,
 }
 
 /// Eine Instanz in der Welt: Position + ihr Stufen-Zustand.
@@ -211,10 +215,17 @@ impl<S: CellSource> WorldPartition<S> {
 
         // 3) Instanzen-Stufen — über den Instanz-Index aufsteigend,
         //    damit die Ereignisliste bei gleichem Input identisch ist.
+        //    Bei tiers_adaptive ist die Regel IO-adaptiert: misst der
+        //    Streamer eine langsame Platte, wird früher abgewertet.
+        let tiers = if self.cfg.tiers_adaptive {
+            self.streamer.telemetry().adapt(&self.cfg.tiers)
+        } else {
+            self.cfg.tiers.clone()
+        };
         for (id, inst) in self.instances.iter_mut().enumerate() {
             let dist = (inst.position - camera).length();
             let from = inst.tier.tier;
-            if let Some(to) = self.cfg.tiers.update(&mut inst.tier, dist, self.time as f32) {
+            if let Some(to) = tiers.update(&mut inst.tier, dist, self.time as f32) {
                 delta.tier_changed.push(TierChange { instance: id, from, to });
             }
         }
@@ -228,6 +239,12 @@ mod tests {
     use crate::stream::MockSource;
 
     fn partition(budget: u64) -> WorldPartition<MockSource> {
+        partition_io(budget, 0.0, 100)
+    }
+
+    /// Partition mit wählbarer Quelle — `latency`/`bytes` bestimmen, was
+    /// die Telemetrie als IO-Geschwindigkeit misst.
+    fn partition_io(budget: u64, latency: f64, bytes: u64) -> WorldPartition<MockSource> {
         WorldPartition::new(
             PartitionConfig {
                 clipmap: ClipmapConfig {
@@ -240,8 +257,9 @@ mod tests {
                     max_inflight: 64,
                 },
                 tiers: TierPolicy::default(),
+                tiers_adaptive: false,
             },
-            MockSource::new(0.0, 100),
+            MockSource::new(latency, bytes),
         )
     }
 
@@ -294,6 +312,33 @@ mod tests {
                 (Tier::T1, Tier::T0),
             ]
         );
+    }
+
+    /// Der End-zu-End-Pfad der IO-Telemetrie: eine langsame Quelle drückt
+    /// die gemessene Gesundheit, und die adaptive Regel wirft die Instanz
+    /// **später** in die feine Stufe zurück als die feste Basis-Regel.
+    #[test]
+    fn io_adaptive_stufen_reagieren_auf_langsame_platte() {
+        fn fliege(adaptive: bool) -> Tier {
+            // Langsam: 0,6 s für 2 KiB → ~3,4 KiB/s.
+            let mut p = partition_io(100_000, 0.6, 2 * 1024);
+            p.cfg.tiers_adaptive = adaptive;
+            let inst = p.spawn(Vec2::new(150.0, 0.0), Some(Vec2::ZERO));
+            assert_eq!(p.tier_of(inst), Some(Tier::T2));
+            // Kamera fährt 15 s mit 5 Einheiten/s auf die Instanz zu.
+            for i in 0..900 {
+                let cam = Vec2::new(i as f32 / 60.0 * 5.0, 0.0);
+                p.update(cam, 1.0 / 60.0);
+            }
+            let health = p.streamer().telemetry().health();
+            assert!(
+                health < 0.4,
+                "die langsame Quelle muss messbar sein: {health}"
+            );
+            p.tier_of(inst).unwrap()
+        }
+        assert_eq!(fliege(false), Tier::T1, "Basis-Regel: bei 75 m ist T1 frei");
+        assert_eq!(fliege(true), Tier::T2, "langsame Platte: T1 bleibt gesperrt");
     }
 
     #[test]

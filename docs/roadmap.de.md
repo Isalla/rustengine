@@ -67,7 +67,7 @@ mit ehrlichem Haken-Stand. ✅ fertig und testabgedeckt · 🟡 teilweise gebaut
       Hysterese, Fade-out; demonstriert von `stream-demo`)
 - [ ] **M3e** Ego-Übergabe: Steuerungsübergabe mitten im Flug ohne
       Szenen-Neuaufbau
-- [ ] IO-Telemetrie: gemessene Lade-Latenz und Durchsatz treiben
+- [x] IO-Telemetrie: gemessene Lade-Latenz und Durchsatz treiben
       Tier-Hysterese und Verweilzeit adaptiv (langsame Platte →
       frühere Abwertung)
 - [ ] MCP-Werkzeuge: Agenten-Zugriff auf Streaming und Szenen-Abfragen
@@ -190,6 +190,7 @@ ist das erste Testprojekt; Shooter und MMO folgen.*
 - [x] GPU-Handoff des Flugs: Triple-Buffering, Zell-Residenz, verzögerte
       Freigabe (`re-world::handoff`, `re-wgpu`)
 - [x] Fernfeld-HLOD am Clipmap-Rand (M3d)
+- [x] IO-Telemetrie & adaptive Stufenregel (`re-world::telemetry`)
 - [ ] Kamera- & Timeline-Layer ([cinema.de](cinema.de.md))
 - [ ] Steuerungs-Übergabe (M3e)
 - [ ] Erster spielbarer Rundflug: RTS-Vertikalschnitt durch alles

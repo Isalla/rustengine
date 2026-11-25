@@ -66,7 +66,7 @@ honest state of repair. ✅ done and test-covered · 🟡 partially built ·
       hysteresis, fade-out; demonstrated by `stream-demo`)
 - [ ] **M3e** First-person handoff: control transfer mid-flight without
       scene rebuild
-- [ ] IO telemetry: measured load latency/throughput drives tier
+- [x] IO telemetry: measured load latency/throughput drives tier
       hysteresis and dwell adaptively (slow disk → degrade earlier)
 - [ ] MCP tools: agent-facing capability bindings for streaming and
       scene queries (builds on the `re-agent` registry scaffold)
@@ -184,6 +184,7 @@ MMO. The RTS is the first test project; shooter and MMO follow.*
 - [x] GPU handoff of the flight: triple buffering, cell residency,
       deferred release (`re-world::handoff`, `re-wgpu`)
 - [x] Far-field HLOD at the clipmap rim (M3d)
+- [x] IO telemetry & adaptive tier rules (`re-world::telemetry`)
 - [ ] Camera & timeline layer ([cinema](cinema.md))
 - [ ] Control handoff (M3e)
 - [ ] First playable: RTS vertical slice exercising the full round trip
