@@ -185,7 +185,7 @@ impl Clipmap {
 }
 
 /// Chebyshev-Abstand Punkt→Quadrat (nächster Punkt des Quadrats).
-fn chebyshev_near(px: f64, py: f64, x: i64, y: i64, s: f64) -> f64 {
+pub(crate) fn chebyshev_near(px: f64, py: f64, x: i64, y: i64, s: f64) -> f64 {
     let dx = axis_near(px, x as f64 * s, s);
     let dy = axis_near(py, y as f64 * s, s);
     dx.max(dy)

@@ -62,7 +62,9 @@ mit ehrlichem Haken-Stand. ✅ fertig und testabgedeckt · 🟡 teilweise gebaut
       Freigabe; `upload_cell`/`release_cell` in den Backend-Traits,
       Zell-Residenz in `re-wgpu` — demonstriert von `stream-demo`
       (Überflug einer Formel-Welt durch die echte GPU-Pipeline)
-- [ ] **M3d** HLOD: vorgebackene Fernfeld-Meshes am Clipmap-Rand
+- [x] **M3d** HLOD: vorgebackene Fernfeld-Meshes am Clipmap-Rand
+      (`re-world::hlod` — Cluster-Registrierung, Übernahmezone mit
+      Hysterese, Fade-out; demonstriert von `stream-demo`)
 - [ ] **M3e** Ego-Übergabe: Steuerungsübergabe mitten im Flug ohne
       Szenen-Neuaufbau
 - [ ] IO-Telemetrie: gemessene Lade-Latenz und Durchsatz treiben
@@ -187,7 +189,7 @@ ist das erste Testprojekt; Shooter und MMO folgen.*
 - [x] Echtes Datei-IO hinter demselben Trait (M3c)
 - [x] GPU-Handoff des Flugs: Triple-Buffering, Zell-Residenz, verzögerte
       Freigabe (`re-world::handoff`, `re-wgpu`)
-- [ ] Fernfeld-HLOD am Clipmap-Rand (M3d)
+- [x] Fernfeld-HLOD am Clipmap-Rand (M3d)
 - [ ] Kamera- & Timeline-Layer ([cinema.de](cinema.de.md))
 - [ ] Steuerungs-Übergabe (M3e)
 - [ ] Erster spielbarer Rundflug: RTS-Vertikalschnitt durch alles

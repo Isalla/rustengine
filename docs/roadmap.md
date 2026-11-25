@@ -61,7 +61,9 @@ honest state of repair. ✅ done and test-covered · 🟡 partially built ·
       `release_cell` in the backend traits, cell residency in `re-wgpu`
       — demonstrated end-to-end by `stream-demo` (fly-over of a
       formula world streamed through the real GPU pipeline)
-- [ ] **M3d** HLOD: baked far-field summary meshes at the clipmap rim
+- [x] **M3d** HLOD: baked far-field summary meshes at the clipmap rim
+      (`re-world::hlod` — cluster registration, take-over zone with
+      hysteresis, fade-out; demonstrated by `stream-demo`)
 - [ ] **M3e** First-person handoff: control transfer mid-flight without
       scene rebuild
 - [ ] IO telemetry: measured load latency/throughput drives tier
@@ -181,7 +183,7 @@ MMO. The RTS is the first test project; shooter and MMO follow.*
 - [x] Real file IO behind the same trait (M3c)
 - [x] GPU handoff of the flight: triple buffering, cell residency,
       deferred release (`re-world::handoff`, `re-wgpu`)
-- [ ] Far-field HLOD at the clipmap rim (M3d)
+- [x] Far-field HLOD at the clipmap rim (M3d)
 - [ ] Camera & timeline layer ([cinema](cinema.md))
 - [ ] Control handoff (M3e)
 - [ ] First playable: RTS vertical slice exercising the full round trip

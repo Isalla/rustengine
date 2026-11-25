@@ -26,7 +26,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use glam::{Mat4, Vec2, Vec3};
+use glam::{Mat4, Quat, Vec2, Vec3};
 use image::RgbaImage;
 use re_core::material::Material;
 use re_core::mesh::Mesh;
@@ -34,7 +34,7 @@ use re_render::{Camera, DrawBatch, GfxBackend, GfxError};
 use re_wgpu::WgpuBackend;
 use re_world::{
     AsyncSource, CellCodec, CellHandoff, CellKey, Clipmap, ClipmapConfig, FileStore, GpuUpload,
-    HandoffConfig, Priority, StreamConfig, Streamer,
+    HandoffConfig, HlodCell, HlodConfig, HlodSet, Priority, StreamConfig, Streamer,
 };
 
 /// Kantenlänge der feinsten Zelle, in Metern.
@@ -73,6 +73,18 @@ fn band_of(avg_height: f32) -> usize {
         h if h < 27.0 => 3, // Fels
         _ => 4,             // Schnee
     }
+}
+
+/// Die HLOD-Zusammenfassung: eine ebene Einheitsebene (1 × 1 m), die pro
+/// Cluster auf Clusterkante skaliert wird. Ein echter Backer lieferte
+/// hier ein vereinfachtes Terrain-Mesh — für die Demo genügt die Silhouette.
+fn hlod_quad() -> Mesh {
+    let mut mesh = Mesh::default();
+    mesh.name = "hlod_cluster".into();
+    mesh.positions = vec![[-0.5, 0.0, -0.5], [0.5, 0.0, -0.5], [0.5, 0.0, 0.5], [-0.5, 0.0, 0.5]];
+    mesh.normals = Some(vec![[0.0, 1.0, 0.0]; 4]);
+    mesh.indices = Some(vec![0, 1, 2, 0, 2, 3]);
+    mesh
 }
 
 const MATERIALS: [Material; 5] = [
@@ -356,6 +368,42 @@ fn main() -> Result<()> {
         key.x >= gx0 && key.x <= gx1 && key.y >= gz0 && key.y <= gz1
     };
 
+    // HLOD (M3d): jenseits der Clipmap-Reichweite füllen grobe Cluster
+    // die Ferne. Der „Bake" ist hier ein Maschenrechteck über dem
+    // Korridor; übernommen wird, was näher als fade_out am Rand liegt.
+    let outer = clip_cfg.cell_size(clip_cfg.levels - 1);
+    let reach = clip_cfg.outer_radius();
+    let mut hlod = HlodSet::new(HlodConfig {
+        cell_size: outer,
+        take_over: reach,
+        fade_out: reach * 8.0,
+        hysteresis: 0.05,
+    });
+    let base_cells = (outer / clip_cfg.base_cell) as u32;
+    let base_cells = base_cells * base_cells * 3; // drei Ebenen grob zusammengefasst
+    let gx0 = (seed_x0 / outer).floor() as i64 - 2;
+    let gx1 = (seed_x1 / outer).ceil() as i64 + 2;
+    let gz0 = (-SEED_HALF_Z * 4.0 / outer).floor() as i64;
+    let gz1 = (SEED_HALF_Z * 4.0 / outer).ceil() as i64;
+    for gz in gz0..=gz1 {
+        for gx in gx0..=gx1 {
+            hlod.register(HlodCell { x: gx, y: gz }, base_cells);
+        }
+    }
+    let hlod_quads = hlod_quad();
+    let hlod_material = Material {
+        name: String::new(),
+        base_color: [0.62, 0.66, 0.58, 1.0],
+        metallic: 0.0,
+        roughness: 0.9,
+        emissive: [0.0; 3],
+        double_sided: true,
+        albedo_texture_id: None,
+        normal_texture_id: None,
+    };
+    let mut hlod_shown_total = 0usize;
+    let mut hlod_hidden_total = 0usize;
+
     for _frame in 0..frames {
         now += dt;
         // Flug: SPEED in X, sanfte Wellenlinie in Z, 45 m über Grund.
@@ -370,6 +418,10 @@ fn main() -> Result<()> {
         camera.view = Mat4::look_at_rh(eye, look, Vec3::Y);
 
         clip.set_center(Vec2::new(px as f32, pz as f32));
+        if let Some(hd) = hlod.update(Vec2::new(px as f32, pz as f32)) {
+            hlod_shown_total += hd.shown.len();
+            hlod_hidden_total += hd.hidden.len();
+        }
         streamer.set_now(now);
         streamer.sync_demand(
             clip.cells()
@@ -409,6 +461,24 @@ fn main() -> Result<()> {
             });
         }
         peak_gpu = peak_gpu.max(batches.len());
+
+        // HLOD-Ebene: die sichtbaren Fern-Cluster als flache Zusammenfassung.
+        for c in hlod.shown() {
+            let ctr = hlod.config().cluster_center(c);
+            let h = height_at(ctr.x as f64, ctr.y as f64);
+            let world = Mat4::from_scale_rotation_translation(
+                Vec3::new(outer as f32, 1.0, outer as f32),
+                Quat::IDENTITY,
+                Vec3::new(ctr.x, h + 0.6, ctr.y),
+            );
+            batches.push(DrawBatch {
+                mesh: &hlod_quads,
+                material: &hlod_material,
+                world,
+                sprite: None,
+                cell: None,
+            });
+        }
         exec.backend.render(&camera, &batches)?;
     }
 
@@ -424,6 +494,13 @@ fn main() -> Result<()> {
         peak_gpu,
         stats.resident,
         stats.resident_bytes / 1024
+    );
+    println!(
+        "HLOD: {} Cluster registriert, {} Übernahmen, {} Rückgaben, {} sichtbar am Ende",
+        hlod.len(),
+        hlod_shown_total,
+        hlod_hidden_total,
+        hlod.shown().len()
     );
     println!(
         "Pipeline am Ende: pending={} filling={} inflight={} — Upload-Kontingent 4 MiB/Frame",

@@ -5,6 +5,7 @@
 //! ```text
 //! update(kamera, dt)
 //!   ├─ Clipmap::set_center      → aktive Zellmenge nachziehen
+//!   ├─ HLOD-Cluster             → Fernfeld-Übernahme jenseits der Reichweite
 //!   ├─ Streamer::sync_demand    → Zellen mit Priorität anfordern
 //!   ├─ Streamer::drive          → Loaded/Evicted/Failed-Ereignisse
 //!   └─ Instanzen-Stufen         → TierChanged-Ereignisse (T0..T4)
@@ -23,6 +24,7 @@ use glam::Vec2;
 
 use crate::clipmap::{Clipmap, ClipmapConfig};
 use crate::grid::CellKey;
+use crate::hlod::{HlodConfig, HlodDelta, HlodSet};
 use crate::stream::{CellSource, Priority, StreamConfig, Streamer};
 use crate::tier::{Tier, TierPolicy, TierState};
 
@@ -59,6 +61,9 @@ pub struct PartitionDelta<P> {
     pub evicted: Vec<CellKey>,
     /// Ladfehler (Quelle kennt die Zelle nicht).
     pub failed: Vec<CellKey>,
+    /// HLOD-Cluster, die neu die Ferne füllen oder ihr weichen — leer,
+    /// solang kein [`WorldPartition::enable_hlod`] registriert wurde.
+    pub hlod: HlodDelta,
     /// Stufenwechsel der Instanzen, sortiert nach Instanz-Index.
     pub tier_changed: Vec<TierChange>,
 }
@@ -69,6 +74,7 @@ impl<P> Default for PartitionDelta<P> {
             loaded: Vec::new(),
             evicted: Vec::new(),
             failed: Vec::new(),
+            hlod: HlodDelta::default(),
             tier_changed: Vec::new(),
         }
     }
@@ -79,6 +85,7 @@ pub struct WorldPartition<S: CellSource> {
     cfg: PartitionConfig,
     clipmap: Clipmap,
     streamer: Streamer<S>,
+    hlod: HlodSet,
     instances: Vec<Instance>,
     time: f64,
 }
@@ -87,10 +94,22 @@ impl<S: CellSource> WorldPartition<S> {
     pub fn new(cfg: PartitionConfig, source: S) -> Self {
         let clipmap = Clipmap::new(cfg.clipmap);
         let streamer = Streamer::new(source, cfg.stream);
+        // Ohne Bake ist HLOD eine leere, unbeobachtete Nebenstrecke.
+        // Default: Clusterkante = Zellgröße der äußersten Ebene, Übernahme
+        // genau dort, wo die Clipmap-Reichweite endet.
+        let outer = cfg.clipmap.cell_size(cfg.clipmap.levels - 1);
+        let reach = cfg.clipmap.outer_radius();
+        let hlod = HlodSet::new(HlodConfig {
+            cell_size: outer,
+            take_over: reach,
+            fade_out: reach * 8.0,
+            hysteresis: 0.05,
+        });
         Self {
             cfg,
             clipmap,
             streamer,
+            hlod,
             instances: Vec::new(),
             time: 0.0,
         }
@@ -111,6 +130,22 @@ impl<S: CellSource> WorldPartition<S> {
 
     pub fn streamer(&self) -> &Streamer<S> {
         &self.streamer
+    }
+
+    /// Die HLOD-Cluster-Menge (Fernfeld am Clipmap-Rand, siehe [`hlod`](crate::hlod)).
+    pub fn hlod(&self) -> &HlodSet {
+        &self.hlod
+    }
+
+    /// HLOD mit anderer Übernahmezone/anderem Raster neu aufsetzen —
+    /// der Bestand startet versteckt (der Bake wird danach eingetragen).
+    pub fn enable_hlod(&mut self, cfg: HlodConfig) {
+        self.hlod = HlodSet::new(cfg);
+    }
+
+    /// Bake-Nachschub: Cluster registrieren/entfernen, ohne die Zone zu ändern.
+    pub fn hlod_mut(&mut self) -> &mut HlodSet {
+        &mut self.hlod
     }
 
     pub fn instances(&self) -> &[Instance] {
@@ -153,6 +188,13 @@ impl<S: CellSource> WorldPartition<S> {
         // 1) Clipmap — die aktive Zellmenge ist eine reine Funktion der
         //    Kamera-Basiszelle, also ohne eigenen Zustand zu diffen.
         self.clipmap.set_center(camera);
+
+        // 1b) HLOD — die Ferne hinter dem Clipmap-Rand. Läuft vor der
+        //    Zell-Nachfrage, damit der Renderer im selben Frame beides
+        //    (Zellen und Cluster) in fester Reihenfolge bekommt.
+        if let Some(hd) = self.hlod.update(camera) {
+            delta.hlod = hd;
+        }
 
         // 2) Nachfrage + Streaming.
         let cells: Vec<(CellKey, Priority)> = self
@@ -307,5 +349,27 @@ mod tests {
             assert_eq!(fa.0, fb.0, "Zell-Ereignisse pro Frame identisch");
             assert_eq!(fa.1, fb.1, "Stufenwechsel pro Frame identisch");
         }
+    }
+
+    /// HLOD hängt als Nebenstrecke an der Partition: Cluster fern der
+    /// Kamera übernehmen, beim Hineinfliegen weichen sie wieder — und
+    /// ohne registrierte Cluster bleibt das Delta leer (alter Pfad).
+    #[test]
+    fn partition_treibt_hlod_cluster() {
+        let mut p = partition(1 << 30); // Reichweite 512, Clusterkante 256
+        assert!(
+            p.update(Vec2::ZERO, 0.1).hlod.is_empty(),
+            "ohne Bake bleibt es leer"
+        );
+
+        let fern = crate::hlod::HlodCell { x: 4, y: 0 }; // [1024, 1280] → d = 1024
+        p.hlod_mut().register(fern, 64);
+        let d = p.update(Vec2::ZERO, 0.1);
+        assert_eq!(d.hlod.shown, vec![fern]);
+
+        // Hineinfliegen: der Cluster umgibt die Kamera → Distanz 0 → zurück.
+        let d = p.update(Vec2::new(1_100.0, 0.0), 0.1);
+        assert_eq!(d.hlod.hidden, vec![fern]);
+        assert!(p.update(Vec2::new(1_100.0, 0.0), 0.1).hlod.is_empty());
     }
 }

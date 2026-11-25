@@ -36,6 +36,7 @@
 pub mod clipmap;
 pub mod grid;
 pub mod handoff;
+pub mod hlod;
 pub mod io;
 pub mod partition;
 pub mod stream;
@@ -43,6 +44,7 @@ pub mod tier;
 
 pub use clipmap::{ClipDiff, Clipmap, ClipmapConfig};
 pub use grid::CellKey;
+pub use hlod::{HlodCell, HlodConfig, HlodDelta, HlodSet};
 pub use handoff::{CellHandoff, GpuUpload, HandoffConfig, HandoffStats};
 pub use io::{AsyncSource, BlockStore, CellCodec, FileStore};
 pub use partition::{Instance, PartitionConfig, PartitionDelta, TierChange, WorldPartition};
