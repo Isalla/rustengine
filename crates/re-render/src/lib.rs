@@ -23,6 +23,9 @@
 //! - [`cull`]    — Frustum-Ebenen, Kugel/AABB-Tests, Hi-Z-Occlusion.
 //! - [`temporal`] — TAA-Referenz: Reprojektion, Box-Clamp, Akkumulation
 //!   (dieselbe Plumbing wie FSR 2/3 und DLSS).
+//! - [`graph`]   — Render-Graph: Pässe/Ressourcen als Daten, topo-
+//!   sortiert, mit Layout-Transitionen und Lebensspannen (Aliasing-
+//!   Grundlage).
 //!
 //! Geplante Backend-Module (je ein eigener Crate, ggf. eigenes Repo):
 //! - `re-wgpu`     (oeffentlich): Vulkan (Linux), DX11/DX12 (Windows),
@@ -38,6 +41,7 @@ pub mod billboard;
 pub mod camera;
 pub mod cluster;
 pub mod cull;
+pub mod graph;
 pub mod gbuffer;
 pub mod hdr;
 pub mod jitter;
@@ -51,6 +55,9 @@ pub use cluster::{
     cluster_view_aabb, cull_lights, log_z_bounds, sphere_intersects_aabb, ClusterGrid, SphereLight,
 };
 pub use cull::{Frustum, HiZPyramid, Plane};
+pub use graph::{
+    Access, AccessKind, CompiledGraph, GraphError, Layout, PassDesc, RenderGraph, ResourceSpan,
+};
 pub use gbuffer::{
     octahedral_decode, octahedral_encode, pack_visibility_id, quantize_uv,
     unpack_visibility_id, ChannelSemantic, GBufferLayout, GBufferTarget, GfxFormat,
