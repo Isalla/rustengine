@@ -63,6 +63,10 @@ pub enum ToneCurve {
     /// ACES-Filmic (Narkowicz-Approximation). Der Default moderner
     /// Engines — kräftige, filmische Sättigung.
     Aces,
+    /// AgX (Blender/Filament-Port). Neutraler, mit sanfterem Highlight-
+    /// Roll-off und besserer Farb-Erhaltung in hellen Bereichen.
+    /// Arbeitet auf ganzen RGB-Tripeln — via [`ToneCurve::map_rgb`].
+    Agx,
 }
 
 impl Default for ToneCurve {
@@ -72,7 +76,8 @@ impl Default for ToneCurve {
 }
 
 impl ToneCurve {
-    /// Ein Kanal: HDR-linear → Display-linear (0..=1).
+    /// Ein Kanal: HDR-linear → Display-linear (0..=1). Für kurven, die
+    /// kanalunabhängig sind, ist das exakt `map_rgb` auf der Graiachse.
     pub fn map(&self, x: f32) -> f32 {
         if x <= 0.0 {
             return 0.0;
@@ -92,9 +97,95 @@ impl ToneCurve {
                 const E: f32 = 0.14;
                 (x * (A * x + B)) / (x * (C * x + D) + E)
             }
+            // AgX ist nicht kanalunabhängig — auf der Graiachse ausgewertet.
+            ToneCurve::Agx => agx([x, x, x])[0],
         };
         y.clamp(0.0, 1.0)
     }
+
+    /// Ein RGB-Tripel: HDR-linear → Display-linear (0..=1). Kanalu-\
+    /// unabhängige Kurven wenden [`Self::map`] pro Kanal an; AgX läuft
+    /// durch seine volle Matrix-Kette.
+    pub fn map_rgb(&self, x: [f32; 3]) -> [f32; 3] {
+        match self {
+            ToneCurve::Agx => agx(x),
+            _ => x.map(|c| self.map(c)),
+        }
+    }
+}
+
+// ── AgX ────────────────────────────────────────────────────────────────
+//
+// Port der Referenz-Implementierung aus three.js/Filament (ihrerseits
+// Blender-Port mit Rec.2020-Primaries); Konstanten von
+// https://iolite-engine.com/blog_posts/minimal_agx_implementation .
+// Die Matrizen sind als Spalten notiert (GLSL-Konvention), angewandt als
+// M·v = c0·x + c1·y + c2·z.
+
+/// 3×3-Matrix aus drei Spalten-Vektoren auf einen Vektor.
+fn m3(c0: [f32; 3], c1: [f32; 3], c2: [f32; 3], v: [f32; 3]) -> [f32; 3] {
+    [
+        c0[0] * v[0] + c1[0] * v[1] + c2[0] * v[2],
+        c0[1] * v[0] + c1[1] * v[1] + c2[1] * v[2],
+        c0[2] * v[0] + c1[2] * v[1] + c2[2] * v[2],
+    ]
+}
+
+/// Die AgX-Sigmoid-Kontrastkurve als Polynom-Fit (Mittelfehler² ≈ 3.7e-6).
+fn agx_sigmoid(x: f32) -> f32 {
+    let x2 = x * x;
+    let x4 = x2 * x2;
+    15.5 * x4 * x2
+        - 40.14 * x4 * x
+        + 31.96 * x4
+        - 6.868 * x2 * x
+        + 0.4298 * x2
+        + 0.1191 * x
+        - 0.00232
+}
+
+/// AgX-Tonemapping: HDR-linear (sRGB-Primaries) → Display-linear.
+///
+/// Kette: sRGB→Rec.2020 → AgX-Inbettung → log2-Zustand (Normalisierung
+/// auf den Belichtungsbereich der Kurve) → Sigmoid-Kontrast →
+/// AgX-Ausbettung → Linearisierung → Rec.2020→sRGB → Klemmung.
+fn agx(color: [f32; 3]) -> [f32; 3] {
+    // sRGB <-> Rec.2020 (ITU-R BT.2407), Spalten wie im Referenz-Shader.
+    const SRGB_TO_2020: [[f32; 3]; 3] = [
+        [0.6274, 0.0691, 0.0164],
+        [0.3293, 0.9195, 0.0880],
+        [0.0433, 0.0113, 0.8956],
+    ];
+    const SRGB_FROM_2020: [[f32; 3]; 3] = [
+        [1.6605, -0.1246, -0.0182],
+        [-0.5876, 1.1329, -0.1006],
+        [-0.0728, -0.0083, 1.1187],
+    ];
+    const INSET: [[f32; 3]; 3] = [
+        [0.856627153315983, 0.137318972929847, 0.11189821299995],
+        [0.0951212405381588, 0.761241990602591, 0.0767994186031903],
+        [0.0482516061458583, 0.101439036467562, 0.811302368396859],
+    ];
+    const OUTSET: [[f32; 3]; 3] = [
+        [1.1271005818144368, -0.1413297634984383, -0.14132976349843826],
+        [-0.11060664309660323, 1.157823702216272, -0.11060664309660294],
+        [-0.016493938717834573, -0.016493938717834257, 1.2519364065950405],
+    ];
+    // log2(Pow(2, ±)) · MIDDLE_GRAY — der Belichtungsbereich der Kurve.
+    const MIN_EV: f32 = -12.47393;
+    const MAX_EV: f32 = 4.026069;
+
+    let mut c = m3(SRGB_TO_2020[0], SRGB_TO_2020[1], SRGB_TO_2020[2], color);
+    c = m3(INSET[0], INSET[1], INSET[2], c);
+    // Log2-Encoding des Zustands, normalisiert auf 0..=1.
+    c = c.map(|v| v.max(1e-10).log2());
+    c = c.map(|v| ((v - MIN_EV) / (MAX_EV - MIN_EV)).clamp(0.0, 1.0));
+    c = c.map(agx_sigmoid);
+    c = m3(OUTSET[0], OUTSET[1], OUTSET[2], c);
+    // Linearisierung (Sigmoid-Raum → linear), dann Primaries zurück.
+    c = c.map(|v| v.max(0.0).powf(2.2));
+    c = m3(SRGB_FROM_2020[0], SRGB_FROM_2020[1], SRGB_FROM_2020[2], c);
+    c.map(|v| v.clamp(0.0, 1.0))
 }
 
 // ── Die Pipeline ──────────────────────────────────────────────────────
@@ -122,7 +213,8 @@ impl HdrPipeline {
 
     /// Belichten + tonemappen, Ergebnis in Display-linear (0..=1).
     pub fn tonemap(&self, linear: [f32; 3]) -> [f32; 3] {
-        linear.map(|c| self.curve.map(c * self.exposure))
+        let exposed = linear.map(|c| c * self.exposure);
+        self.curve.map_rgb(exposed)
     }
 
     /// Belichten + tonemappen + sRGB-Encoding. Ergebnis in Display-sRGB
@@ -269,6 +361,7 @@ mod tests {
             ToneCurve::Reinhard,
             ToneCurve::ReinhardExtended { white: 4.0 },
             ToneCurve::Aces,
+            ToneCurve::Agx,
         ];
         for curve in kurven {
             assert_eq!(curve.map(0.0), 0.0, "{curve:?}: Schwarz bleibt Schwarz");
@@ -434,5 +527,57 @@ mod tests {
             g.tick(1e6, MIDDLE_GRAY, 1.0);
             assert!(g.exposure <= 4.0 + 1e-5 && g.exposure >= 0.25 - 1e-5, "Ausreißer {}", g.exposure);
         }
+    }
+
+    #[test]
+    fn agx_erhaelt_grauachse() {
+        // AgX-Matrizen haben Zeilensumme ~1: Neutralgrau bleibt neutral.
+        // Toleranz 5e-3, weil die Referenz-Matrizen (BT.2407) nur auf
+        // 4 Nachkommastellen gerundet sind.
+        for &g in &[0.01f32, 0.18, 0.5, 2.0, 40.0] {
+            let out = ToneCurve::Agx.map_rgb([g, g, g]);
+            assert!(
+                (out[0] - out[1]).abs() < 5e-3 && (out[1] - out[2]).abs() < 5e-3,
+                "grau {g} -> {out:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn agx_anker_und_monotonie() {
+        assert_eq!(ToneCurve::Agx.map_rgb([0.0, 0.0, 0.0]), [0.0, 0.0, 0.0]);
+        let hot = ToneCurve::Agx.map_rgb([100.0, 100.0, 100.0]);
+        assert!(hot.iter().all(|&c| c > 0.95), "weiß -> {hot:?}");
+        let mut last = -1.0;
+        let mut x = 0.0f32;
+        while x <= 200.0 {
+            let y = ToneCurve::Agx.map(x);
+            assert!((0.0..=1.0).contains(&y) && y >= last, "Agx nicht monoton bei {x}");
+            last = y;
+            x += 0.1;
+        }
+    }
+
+    #[test]
+    fn agx_erhaelt_farbreihenfolge() {
+        // Warme HDR-Lichter bleiben warm (R > G > B) — AgX desättiert
+        // sanft in Highlights, kippt aber die Farbordnung nicht.
+        let out = ToneCurve::Agx.map_rgb([3.0, 1.2, 0.3]);
+        assert!(out[0] > out[1] && out[1] > out[2], "Reihenfolge {out:?}");
+        // Und AgX verhält sich anders als ACES (eigene Kurve, kein Alias).
+        let aces = ToneCurve::Aces.map_rgb([3.0, 1.2, 0.3]);
+        let delta = (out[0] - aces[0]).abs() + (out[1] - aces[1]).abs() + (out[2] - aces[2]).abs();
+        assert!(delta > 0.01, "AgX == ACES? {out:?} vs {aces:?}");
+    }
+
+    #[test]
+    fn pipeline_mit_agx() {
+        let p = HdrPipeline { exposure: 1.3, curve: ToneCurve::Agx };
+        let out = p.process([0.5, 0.35, 0.2]);
+        assert!(out.iter().all(|&c| (0.0..=1.0).contains(&c)), "{out:?}");
+        // Dunkleres Bild bei höherem EV100 gilt für AgX ebenso.
+        let dunkel = HdrPipeline { curve: ToneCurve::Agx, ..HdrPipeline::with_ev100(3.0) }.process([0.5, 0.35, 0.2]);
+        let hell = HdrPipeline { curve: ToneCurve::Agx, ..HdrPipeline::with_ev100(-1.0) }.process([0.5, 0.35, 0.2]);
+        assert!(dunkel[0] < hell[0]);
     }
 }
