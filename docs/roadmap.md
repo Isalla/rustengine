@@ -80,7 +80,7 @@ honest state of repair. ✅ done and test-covered · 🟡 partially built ·
       viewpoint; windowed + headless smoke path)
 - [ ] Outliner & inspector over the ECS
 - [ ] Import pipeline UI wrapping `re-io`
-- [ ] Undo/redo as reversible systems
+- [x] Undo/redo as reversible systems (`re-editor::undo` — `Command<T>` trait, `CommandStack` with cursor, built-in commands for camera/selection/view-mode, `editor.undo/redo/history` capabilities)
 - [ ] Worldbuilder project loader
 
 ## M5 — Render pipeline V2 ⬜

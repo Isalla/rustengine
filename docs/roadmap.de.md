@@ -83,7 +83,7 @@ mit ehrlichem Haken-Stand. ✅ fertig und testabgedeckt · 🟡 teilweise gebaut
       Blickpunkt; Fenster- + Headless-Smoke-Pfad)
 - [ ] Outliner & Inspector über der ECS
 - [ ] Import-Pipeline-UI um `re-io`
-- [ ] Undo/Redo als umkehrbare Systeme
+- [x] Undo/Redo als umkehrbare Systeme (`re-editor::undo` — `Command<T>`-Trait, `CommandStack` mit Cursor, Built-in-Commands für Kamera/Selektion/Ansichtsmodus, `editor.undo/redo/history`-Capabilities)
 - [ ] Worldbuilder-Projekt-Loader
 
 ## M5 — Render-Pipeline V2 ⬜

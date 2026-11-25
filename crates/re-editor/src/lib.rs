@@ -11,6 +11,13 @@
 //! Doppelte Adressierbarkeit (M11): alles, was hier als Capability
 //! registriert ist, kann Editor, KI und (später) MCP gleichermaßen.
 
+pub mod undo;
+
+pub use undo::{
+    Command, CommandStack, SetCameraCommand, SetSelectionCommand, SetViewModeCommand,
+    SharedCommandStack, register_undo_tools,
+};
+
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use glam::{Mat4, Vec3};
