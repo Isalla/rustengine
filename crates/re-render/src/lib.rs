@@ -21,7 +21,9 @@
 pub mod backend;
 pub mod billboard;
 pub mod camera;
+pub mod hdr;
 
 pub use backend::{DrawBatch, GfxBackend, GfxError, NullBackend, Sprite};
 pub use billboard::{billboard_matrix, unit_quad, uv_rect};
 pub use camera::Camera;
+pub use hdr::{exposure_from_ev100, linear_to_srgb, srgb_to_linear, HdrPipeline, ToneCurve};
