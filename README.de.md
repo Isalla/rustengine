@@ -28,8 +28,11 @@ Testfelder geplant. Details: [docs/architecture.de.md](docs/architecture.de.md).
 
 **Status:** frühe Entwicklung. Kern-Datenmodell, Import/Export, erstes
 Backend, Fenster-Layer, ECS und der World-Streaming-Kern sind
-funktionsfähig; asynchrone Lade-Pipeline, Audio/Physik und Editor
-entstehen Meilenstein für Meilenstein (siehe unten).
+funktionsfähig — inklusive asynchroner Datei-IO, GPU-Handoff,
+Fernfeld-HLOD, IO-Telemetrie und der Steuerungs-Übergabe Strategie↔Ego
+mitten im Flug, demonstriert vom `stream-demo`-Rundflug. Als nächstes
+folgt der Editor (M4), Audio/Physik Meilenstein für Meilenstein
+(siehe unten).
 
 ## Crates
 
@@ -37,12 +40,12 @@ entstehen Meilenstein für Meilenstein (siehe unten).
 |---|---|---|
 | `re-core` | Datenmodell: Szene, Mesh, Material, Animation, Terrain, Tilesets | fertig |
 | `re-io` | glTF-2.0-Import/Export inkl. Textur-Einbettung | fertig |
-| `re-ecs` | Entity-Component-System: Welt, Sparse-Set-Speicher, Schedule | in Arbeit |
-| `re-world` | World-Partition: Rasterzellen, Clipmap-Streaming, Quality-Tiers T0..T4, Streaming-Budget | in Arbeit |
+| `re-ecs` | Entity-Component-System: Welt, Sparse-Set-Speicher, Schedule | fertig |
+| `re-world` | World-Partition: Rasterzellen, Clipmap-Streaming, Quality-Tiers T0..T4, Streaming-Budget, HLOD, IO-Telemetrie, Ego-Übergabe | fertig |
 | `re-render` | Backend-neutrale Render-Schicht (`GfxBackend`), Kamera, Billboards | in Arbeit |
 | `re-wgpu` | wgpu-Backend: Vulkan/Metal/WebGPU (DirectX über wgpu), Offscreen und Fenster | in Arbeit |
 | `re-platform` | Fenster, Eingabe, Event-Loop, Zeit (winit; headless für Tests) | in Arbeit |
-| `re-agent` | Capability-Registry + Anbindung von KI-Providern (Ollama, llama.cpp, OpenAI-kompatibel, Anthropic) | Gerüst |
+| `re-agent` | Capability-Registry + Anbindung von KI-Providern (Ollama, llama.cpp, OpenAI-kompatibel, Anthropic) + Welt-Werkzeuge für Agenten | in Arbeit |
 
 Geplant: `re-editor` (M4), natives Backend `re-native` (M6/M7 für
 Raytracing und DLSS), `re-audio`/`re-vfx`/`re-physics` (M8), Go-Dienste
@@ -79,7 +82,7 @@ Die lebende Checkliste mit jedem Unterpunkt: [docs/roadmap.de.md](docs/roadmap.d
 - **M0** — Repo, Workspace, Kern-Datenmodell und glTF-Pipeline ✅
 - **M1** — `re-render` + `re-wgpu`: Szenen mit glTF-Texturen rendern (Offscreen) ✅
 - **M2** — `re-platform`: Fenster, Eingabe, Delta-Time, Surface-Rendering ✅
-- **M3** — ECS + Welt-Streaming: World-Partition ✅ (`re-ecs` + `re-world`: Raster, Clipmap, Tiers, Streaming-Kern); asynchrone Lade-Pipeline und MCP-Werkzeuge für Agenten noch offen
+- **M3** — ECS + Welt-Streaming ✅ (`re-ecs` + `re-world`: Raster, Clipmap, Tiers, asynchrone IO-Pipeline, GPU-Handoff, HLOD, IO-Telemetrie, Ego-Übergabe, Welt-Werkzeuge für Agenten)
 - **Wiki** — Doku in drei Stufen: Rustdoc auf GitHub Pages (automatisch aus den Crate-Docs), Nutzer-Handbuch EN/DE (mdBook), API-Browser im Editor (auf Basis von `cargo rustdoc --output-format json`, geteiltes Registry-Konzept mit dem Agenten-Kern)
 - **M4** — Editor: Szenen-View, Outliner, Inspector, Import-Pipelines, Undo
 - **M5** — Render-Pipeline V2: Deferred HDR, Schatten 2.0, Upscaling-Adapter (FSR/XeSS/DLSS) ([docs/rendering.de.md](docs/rendering.de.md))
@@ -88,7 +91,7 @@ Die lebende Checkliste mit jedem Unterpunkt: [docs/roadmap.de.md](docs/roadmap.d
 - **M8** — Audio (SFX-Events), VFX (GPU-Partikel, Effekt-Graphen), Physik, Animation
 - **M9** — Go-Dienste (Netcode, dedizierter Server, Buildfarm) + WebGPU-Build
 - **M10** — Konsolen-Backends (private SDK-Module), Publishing
-- **Leitfeature** — Strategie↔Ego: Kameraflug in die Einheit ohne Ladebildschirm (Quality-Tiers aus M3, Timeline aus [docs/cinema.de.md](docs/cinema.de.md))
+- **Leitfeature** — Strategie↔Ego: Kameraflug in die Einheit ohne Ladebildschirm; die Steuerungs-Übergabe selbst funktioniert bereits mitten im Flug (M3e), die volle Flug-Choreografie folgt mit [docs/cinema.de.md](docs/cinema.de.md)
 
 ## Konsolen
 

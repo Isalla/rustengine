@@ -28,8 +28,10 @@ follow-ups. Details: [docs/architecture.md](docs/architecture.md).
 
 **Status:** early development. The core data model, import/export, the
 first backend, the window layer, ECS and the world-streaming core are
-working; the async IO pipeline, audio/physics and the editor are
-coming together milestone by milestone (see below).
+working — including async file IO, the GPU handoff, far-field HLOD, IO
+telemetry and the mid-flight strategy↔first-person control handoff,
+demonstrated end-to-end by the `stream-demo` fly-over. The editor (M4)
+is next; audio/physics follow milestone by milestone (see below).
 
 ## Crates
 
@@ -37,12 +39,12 @@ coming together milestone by milestone (see below).
 |---|---|---|
 | `re-core` | Data model: scene, mesh, material, animation, terrain, tilesets | done |
 | `re-io` | glTF 2.0 import/export incl. texture embedding | done |
-| `re-ecs` | Entity-component-system: world, sparse-set storage, schedule | in progress |
-| `re-world` | World partition: grid cells, clipmap streaming, quality tiers T0..T4, streaming budget | in progress |
+| `re-ecs` | Entity-component-system: world, sparse-set storage, schedule | done |
+| `re-world` | World partition: grid cells, clipmap streaming, quality tiers T0..T4, streaming budget, HLOD, IO telemetry, ego handoff | done |
 | `re-render` | Backend-neutral render layer (`GfxBackend`), camera, billboards | in progress |
 | `re-wgpu` | wgpu backend: Vulkan/Metal/WebGPU (DirectX via wgpu), offscreen and windowed | in progress |
 | `re-platform` | Windows, input, event loop, time (winit; headless for tests) | in progress |
-| `re-agent` | Capability registry + AI provider bindings (Ollama, llama.cpp, OpenAI-compatible, Anthropic) | scaffold |
+| `re-agent` | Capability registry + AI provider bindings (Ollama, llama.cpp, OpenAI-compatible, Anthropic) + agent-facing world tools | in progress |
 
 Planned: `re-editor` (M4), native backend `re-native` (M6/M7 for ray
 tracing and DLSS), `re-audio`/`re-vfx`/`re-physics` (M8), Go services
@@ -80,7 +82,7 @@ The living checklist with every sub-item: [docs/roadmap.md](docs/roadmap.md).
 - **M0** — repo, workspace, core data model and glTF pipeline ✅
 - **M1** — `re-render` + `re-wgpu`: render scenes with glTF textures (offscreen) ✅
 - **M2** — `re-platform`: windows, input, delta time, surface rendering ✅
-- **M3** — ECS + world streaming: world partition ✅ (`re-ecs` + `re-world`: grid, clipmap, tiers, streaming core); async loading pipeline and MCP tools for agents still open
+- **M3** — ECS + world streaming ✅ (`re-ecs` + `re-world`: grid, clipmap, tiers, async IO pipeline, GPU handoff, HLOD, IO telemetry, first-person handoff, agent world tools)
 - **Wiki** — documentation in three layers: rustdoc on GitHub Pages (built from the crate docs), user handbook EN/DE (mdBook), API browser inside the editor (fed by `cargo rustdoc --output-format json`, sharing the registry idea with the agent core)
 - **M4** — editor: scene view, outliner, inspector, import pipelines, undo
 - **M5** — render pipeline V2: deferred HDR, shadows 2.0, upscaling adapters (FSR/XeSS/DLSS) ([docs/rendering.md](docs/rendering.md))
@@ -89,7 +91,7 @@ The living checklist with every sub-item: [docs/roadmap.md](docs/roadmap.md).
 - **M8** — audio (SFX events), VFX (GPU particles, effect graphs), physics, animation
 - **M9** — Go services (netcode, dedicated server, build farm) + WebGPU build
 - **M10** — console backends (private SDK modules), publishing
-- **Signature feature** — strategy↔first-person: camera flight into the unit with no loading screen (quality tiers from M3, timeline from [docs/cinema.md](docs/cinema.md))
+- **Signature feature** — strategy↔first-person: camera flight into the unit with no loading screen; the control handoff itself already works mid-flight (M3e), the full flight choreography comes with [docs/cinema.md](docs/cinema.md)
 
 ## Consoles
 
