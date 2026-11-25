@@ -5,7 +5,8 @@
 Dieses Papier hält die Grundentscheidungen fest, die aus dem Leitfeature
 folgen (unten). Es ersetzt keine Details: Rendering-Pipeline und
 Licht-Qualitätsstufen sind in [rendering.de.md](rendering.de.md) eigens
-beschrieben.
+beschrieben. Einzelne Grundentscheidungen sind als
+[Architecture Decision Records](adr/README.de.md) festgehalten.
 
 ## 1. Leitfeature: Strategie ↔ Ego ohne Ladebildschirm
 

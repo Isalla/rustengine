@@ -5,7 +5,8 @@ English | [Deutsch](architecture.de.md)
 This paper records the base decisions that follow from the signature
 feature (below). It does not replace details: the rendering pipeline and
 light quality tiers are described separately in
-[rendering.md](rendering.md).
+[rendering.md](rendering.md). Individual base decisions are recorded as
+[Architecture Decision Records](adr/README.md).
 
 ## 1. Signature feature: strategy ↔ first-person without a loading screen
 
