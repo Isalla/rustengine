@@ -5,8 +5,6 @@
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use anyhow::Context;
-use anyhow::Context;
 use re_core::project::Project;
 use re_agent::capability::{CapabilityRegistry, ToolSpec};
 use serde_json::json;
