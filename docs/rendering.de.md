@@ -60,12 +60,21 @@ unten immer spielbar — auch im Browser.
   * **FSR 2/3** (zeitlich + Frame Generation): AMD liefert MIT-lizenzierte
     Shader; Port nach WGSL für alle Plattformen, natives Timing auf
     Desktop.
+  * **FSR 4 / „Redstone"** (ML-Super-Resolution, Ray Regeneration, Frame
+    Generation): quelloffen (MIT), aber hardware-seitig an RDNA 4
+    gebunden; nur natives Backend.
   * **XeSS**: läuft über mitgelieferten SPIR-V-Dispatcher; nur natives
-    Backend, nicht WebGPU.
+    Backend, nicht WebGPU. XeSS 2 (Frame Generation) ist an Arc gebunden.
   * **DLSS (Super Resolution, Ray Reconstruction, Frame Generation)**:
     proprietäres NVIDIA-SDK, nur natives Backend (`re-native`),
     optionaler Feature-Build; Lizenzbedingungen des SDK bleiben beim
-    Anwender.
+    Anwender. Aktuelle Generation: DLSS 4/4.5 (RTX, Multi-Frame
+    Generation); Referenz-Integration: `dlss_wgpu` (bevyengine) zeigt,
+    dass der wgpu-Weg funktioniert.
+  * Keine der Adapter-Firmen verlangt eine Freigabe pro Titel — die
+    Grenzen sind Lizenztyp, Hardware-Bindung und Plattform. Proprietäre
+    Binaries werden nie in diesem Repo gebündelt: das Spiel-Projekt
+    stellt den SDK-Pfad selbst bereit (wie UE/Unity es handhaben).
   * Kein Upscaler ist Pflicht: natives 1:1-Rendern bleibt Modus.
 * Motion-Vektor- und Tiefenformate von Anfang an kompatibel zu FSR2/3
   gehalten (Reverse-Z-Konvention dokumentiert).

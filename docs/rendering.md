@@ -58,11 +58,21 @@ playable — even in the browser.
   * `Nis`/`Easu`-style spatial upscaler (everywhere, required fallback)
   * **FSR 2/3** (temporal + frame generation): AMD ships MIT-licensed
     shaders; ported to WGSL for all platforms, native timing on desktop.
+  * **FSR 4 / „Redstone"** (ML super resolution, ray regeneration, frame
+    generation): open source (MIT) but hardware-locked to RDNA 4; native
+    backend only.
   * **XeSS**: runs via the shipped SPIR-V dispatcher; native backend
-    only, not WebGPU.
+    only, not WebGPU. XeSS 2's frame generation is Arc-locked.
   * **DLSS (super resolution, ray reconstruction, frame generation)**:
     proprietary NVIDIA SDK, native backend only (`re-native`), optional
     feature build; the SDK's license terms remain the user's concern.
+    Current generation: DLSS 4/4.5 (RTX, multi-frame generation);
+    reference integration: `dlss_wgpu` (bevyengine) shows the wgpu
+    route works.
+  * No vendor approval is required for any adapter — the constraints
+    are license type, hardware lock-in and platform. Proprietary
+    binaries are never vendored in this repo: game projects supply the
+    SDK path themselves (as UE/Unity handle it).
   * No upscaler is required: native 1:1 rendering stays a mode.
 * Motion-vector and depth formats kept compatible with FSR2/3 from the
   start (reverse-Z convention documented).
