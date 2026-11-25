@@ -91,6 +91,8 @@ Crate-Kommentaren selbst (`cargo doc --workspace`).
 ## Meilensteine
 
 Die lebende Checkliste mit jedem Unterpunkt: [docs/roadmap.de.md](docs/roadmap.de.md).
+Systematische Fahndung — Bedrohungsmodell, Audit-Gänge und Fund-Log:
+[docs/security.de.md](docs/security.de.md) · [docs/bugs.de.md](docs/bugs.de.md).
 
 - **M0** — Repo, Workspace, Kern-Datenmodell und glTF-Pipeline ✅
 - **M1** — `re-render` + `re-wgpu`: Szenen mit glTF-Texturen rendern (Offscreen) ✅

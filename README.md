@@ -91,6 +91,8 @@ crate comments themselves (`cargo doc --workspace`).
 ## Milestones
 
 The living checklist with every sub-item: [docs/roadmap.md](docs/roadmap.md).
+Systematic hunting grounds — threat model, audit passes and findings
+log: [docs/security.md](docs/security.md) · [docs/bugs.md](docs/bugs.md).
 
 - **M0** — repo, workspace, core data model and glTF pipeline ✅
 - **M1** — `re-render` + `re-wgpu`: render scenes with glTF textures (offscreen) ✅
