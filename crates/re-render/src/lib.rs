@@ -27,5 +27,8 @@ pub mod shadow;
 pub use backend::{DrawBatch, GfxBackend, GfxError, NullBackend, Sprite};
 pub use billboard::{billboard_matrix, unit_quad, uv_rect};
 pub use camera::Camera;
-pub use hdr::{exposure_from_ev100, linear_to_srgb, srgb_to_linear, HdrPipeline, ToneCurve};
+pub use hdr::{
+    ev100_from_luminance, exposure_from_ev100, linear_to_srgb, luminance, mean_luminance,
+    srgb_to_linear, AdaptiveExposure, HdrPipeline, ToneCurve, MIDDLE_GRAY,
+};
 pub use shadow::CascadeSetup;

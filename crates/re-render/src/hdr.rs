@@ -138,6 +138,96 @@ impl HdrPipeline {
     }
 }
 
+// ── Luminanz und Messung ──────────────────────────────────────────────
+
+/// Rec.709-Leuchtdichte eines linearen RGB-Werts (Gewichtssumme = 1).
+pub fn luminance(rgb: [f32; 3]) -> f32 {
+    0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2]
+}
+
+/// Mittlere Leuchtdichte einer Menge linearer Pixel (arithmetisch).
+/// Leere Eingabe liefert 0.
+pub fn mean_luminance(pixels: &[[f32; 3]]) -> f32 {
+    if pixels.is_empty() {
+        return 0.0;
+    }
+    pixels.iter().map(|p| luminance(*p)).sum::<f32>() / pixels.len() as f32
+}
+
+/// Standard-Key der Belichtungsmessung: mittleres Grau.
+pub const MIDDLE_GRAY: f32 = 0.18;
+
+/// EV100 aus gemittelter Szenen-Leuchtdichte (linear) — Formel der
+/// einfallenden Messung: `ev100 = log2(L · 100 / 12.19)`.
+/// Eine Verdopplung von L erhöht EV100 um genau 1 Blende.
+pub fn ev100_from_luminance(l: f32) -> f32 {
+    (l * 100.0 / 12.19).log2()
+}
+
+// ── Zeitliche Belichtungs-Anpassung ───────────────────────────────────
+
+/// Augen-Adaption: die Belichtung wandert mit begrenzter Geschwindigkeit
+/// (in Blenden/Sekunde) zum Zielwert, im log2-Raum — wie die Pupille.
+///
+/// Richtungsgesondert: steigt die Belichtung (Szene wird dunkler),
+/// adaptiert das Auge schnell; sinkt sie (Szene wird heller, Blendung),
+/// langsam. Beide Tempi sind konfigurierbar.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct AdaptiveExposure {
+    /// Aktueller Belichtungs-Multiplikator.
+    pub exposure: f32,
+    /// Erlaubter Bereich des Multiplikators.
+    pub min: f32,
+    pub max: f32,
+    /// Blenden/Sekunde, wenn die Belichtung steigt (dunkle Szene).
+    pub speed_up: f32,
+    /// Blenden/Sekunde, wenn die Belichtung sinkt (helle Szene).
+    pub speed_down: f32,
+}
+
+impl Default for AdaptiveExposure {
+    fn default() -> Self {
+        Self { exposure: 1.0, min: 1e-4, max: 1e4, speed_up: 3.0, speed_down: 1.0 }
+    }
+}
+
+impl AdaptiveExposure {
+    /// Ziel-Belichtung für eine gemessene Szenen-Leuchtdichte:
+    /// `key / L`, in `[min, max]` geklemmt. Schwarze Szenen (L ≤ 0)
+    /// ziehen auf `max` (stärkstes Aufhellen).
+    pub fn target_for(&self, mean_lum: f32, key: f32) -> f32 {
+        if mean_lum <= 0.0 {
+            return self.max;
+        }
+        (key / mean_lum).clamp(self.min, self.max)
+    }
+
+    /// Ein Zeitschritt: bewegt `exposure` um höchstens `speed·dt` Blenden
+    /// Richtung Ziel (überschießt nie) und gibt den neuen Wert zurück.
+    pub fn tick(&mut self, mean_lum: f32, key: f32, dt: f32) -> f32 {
+        let target = self.target_for(mean_lum, key);
+        let cur = self.exposure.max(1e-9).log2();
+        let tgt = target.max(1e-9).log2();
+        let delta = self.speed_for(tgt > cur).max(0.0) * dt.max(0.0);
+        let new_log = if tgt > cur {
+            (cur + delta).min(tgt)
+        } else {
+            (cur - delta).max(tgt)
+        };
+        self.exposure = new_log.exp2();
+        self.exposure
+    }
+
+    /// Tempo je Richtung: steigen ist schnell, sinken ist langsam.
+    fn speed_for(&self, rising: bool) -> f32 {
+        if rising {
+            self.speed_up
+        } else {
+            self.speed_down
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -245,5 +335,104 @@ mod tests {
         assert!(white.iter().all(|&v| v >= 250), "weiß -> {white:?}");
         let mid = p.process_u8([0.18, 0.18, 0.18]);
         assert!(mid.iter().all(|&v| (1..=254).contains(&v)), "grau -> {mid:?}");
+    }
+
+    #[test]
+    fn luminanz_anker_und_gewichte() {
+        assert!(approx(luminance([0.0, 0.0, 0.0]), 0.0, 1e-6));
+        assert!(approx(luminance([1.0, 1.0, 1.0]), 1.0, 1e-6));
+        assert!(approx(luminance([0.18, 0.18, 0.18]), 0.18, 1e-6));
+        // Gewichtssumme = 1 (Reziprok-Test über Primärvalenzen).
+        let sum = luminance([1.0, 0.0, 0.0]) + luminance([0.0, 1.0, 0.0]) + luminance([0.0, 0.0, 1.0]);
+        assert!(approx(sum, 1.0, 1e-6));
+        // Grün dominiert die Luminanz.
+        assert!(luminance([0.0, 1.0, 0.0]) > luminance([1.0, 0.0, 0.0]));
+    }
+
+    #[test]
+    fn mittlere_luminanz() {
+        assert_eq!(mean_luminance(&[]), 0.0);
+        let m = mean_luminance(&[[0.0, 0.0, 0.0], [1.0, 1.0, 1.0]]);
+        assert!(approx(m, 0.5, 1e-6));
+    }
+
+    #[test]
+    fn ev100_anker_und_blendenregel() {
+        // L = 0.1219 ist per Definition EV100 = 0.
+        assert!(approx(ev100_from_luminance(0.1219), 0.0, 1e-4));
+        // Verdopplung der Leuchtdichte = +1 Blende.
+        assert!(approx(ev100_from_luminance(0.2438) - ev100_from_luminance(0.1219), 1.0, 1e-4));
+        // Konsistenz mit der Belichtung: 2^-ev100 == 0.1219 / L.
+        let l = 0.7;
+        assert!(approx(exposure_from_ev100(ev100_from_luminance(l)), 0.1219 / l, 1e-4));
+    }
+
+    #[test]
+    fn ziel_belichtung_aus_messung() {
+        let a = AdaptiveExposure::default();
+        // Szene ist genau mittleres Grau -> Belichtung 1,0.
+        assert!(approx(a.target_for(MIDDLE_GRAY, MIDDLE_GRAY), 1.0, 1e-6));
+        // Halb so hell -> doppelte Belichtung.
+        assert!(approx(a.target_for(MIDDLE_GRAY * 0.5, MIDDLE_GRAY), 2.0, 1e-5));
+        // Schwarz zieht aufs Maximum, extrem hell unters Minimum.
+        assert_eq!(a.target_for(0.0, MIDDLE_GRAY), a.max);
+        let eng = AdaptiveExposure { min: 0.5, max: 2.0, ..Default::default() };
+        assert_eq!(eng.target_for(1000.0, MIDDLE_GRAY), 0.5);
+    }
+
+    #[test]
+    fn adaption_naehert_schrittweise_ohne_ueberschiessen() {
+        // Dunkle Szene: Ziel ist 32 ( = +5 Blenden), speed_up 3 Blenden/s.
+        let mut a = AdaptiveExposure::default();
+        let dunkel = MIDDLE_GRAY / 32.0;
+        assert!(approx(a.target_for(dunkel, MIDDLE_GRAY), 32.0, 1e-4));
+        // dt = 0 ändert nichts.
+        assert!(approx(a.tick(dunkel, MIDDLE_GRAY, 0.0), 1.0, 1e-6));
+        // Nach 1 s: 3 Blenden hoch -> 8.
+        assert!(approx(a.tick(dunkel, MIDDLE_GRAY, 1.0), 8.0, 1e-4));
+        // Nach 2 s: Ziel erreicht (nur noch 2 Blenden) -> 32, und es bleibt dort.
+        assert!(approx(a.tick(dunkel, MIDDLE_GRAY, 1.0), 32.0, 1e-3));
+        assert!(approx(a.tick(dunkel, MIDDLE_GRAY, 5.0), 32.0, 1e-3), "überschießt nicht");
+    }
+
+    #[test]
+    fn adaption_richungsunterschied() {
+        // Heller Szenenwechsel (Belichtung muss sinken) ist langsam
+        // (speed_down = 1), der dunkle Wechsel schnell (speed_up = 3).
+        let mut langsam = AdaptiveExposure { exposure: 32.0, ..Default::default() };
+        let hellig = langsam.tick(MIDDLE_GRAY, MIDDLE_GRAY, 1.0); // Ziel 1
+        assert!(approx(hellig, 16.0, 1e-3), "sinkt 1 Blende/s: {hellig}");
+
+        let mut schnell = AdaptiveExposure { exposure: 1.0 / 32.0, ..Default::default() };
+        let dunkel = schnell.tick(MIDDLE_GRAY / 32.0, MIDDLE_GRAY, 1.0); // Ziel 1
+        assert!(approx(dunkel, 8.0 / 32.0, 1e-3), "steigt 3 Blenden/s: {dunkel}");
+        // In Blenden gemessen: steigen bewegt 3x mehr als sinken.
+        let steigt = (schnell.exposure * 32.0).log2();
+        let sinkt = (32.0 / hellig).log2();
+        assert!(approx(sinkt, 1.0, 1e-3) && approx(steigt, 3.0, 1e-3), "3 Blenden vs 1 Blende");
+    }
+
+    #[test]
+    fn adaption_deterministisch_und_begrenzt() {
+        let folge = |seed: f32| {
+            let mut a = AdaptiveExposure { exposure: seed, ..Default::default() };
+            let mut out = Vec::new();
+            for i in 0..20 {
+                let l = MIDDLE_GRAY * (1.0 + (i as f32 * 0.7).sin());
+                out.push(a.tick(l, MIDDLE_GRAY, 1.0 / 60.0));
+            }
+            out
+        };
+        let a = folge(1.0);
+        let b = folge(1.0);
+        assert_eq!(a, b, "gleiche Eingabe -> gleiche Folge");
+        let eng = AdaptiveExposure { min: 0.25, max: 4.0, ..Default::default() };
+        let mut g = eng;
+        for _ in 0..200 {
+            g.tick(1e-6, MIDDLE_GRAY, 1.0);
+            assert!(g.exposure <= 4.0 + 1e-5 && g.exposure >= 0.25 - 1e-5, "Ausreißer {}", g.exposure);
+            g.tick(1e6, MIDDLE_GRAY, 1.0);
+            assert!(g.exposure <= 4.0 + 1e-5 && g.exposure >= 0.25 - 1e-5, "Ausreißer {}", g.exposure);
+        }
     }
 }
