@@ -11,9 +11,11 @@
 //! Doppelte Adressierbarkeit (M11): alles, was hier als Capability
 //! registriert ist, kann Editor, KI und (später) MCP gleichermaßen.
 
+pub mod import;
 pub mod project;
 pub mod undo;
 
+pub use import::{ImportResult, import_gltf, import_summary, register_import_tools};
 pub use project::{ProjectDoc, SharedProjectDoc, register_project_tools};
 pub use undo::{
     Command, CommandStack, SetCameraCommand, SetSelectionCommand, SetViewModeCommand,

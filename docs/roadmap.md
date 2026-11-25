@@ -79,7 +79,7 @@ honest state of repair. ✅ done and test-covered · 🟡 partially built ·
       (`re-editor` — free-fly camera, streaming world follows the
       viewpoint; windowed + headless smoke path)
 - [ ] Outliner & inspector over the ECS
-- [ ] Import pipeline UI wrapping `re-io`
+- [x] Import pipeline wrapping `re-io` (`re-editor::import` — `import_gltf`, `import.preview`/`import.gltf` capabilities, Roundtrip-Test)
 - [x] Undo/redo as reversible systems (`re-editor::undo` — `Command<T>` trait, `CommandStack` with cursor, built-in commands for camera/selection/view-mode, `editor.undo/redo/history` capabilities)
 - [x] Worldbuilder project loader (`re-editor::project` — `ProjectDoc` mit Pfad/Dirty, `project.new/load/save/close/info` capabilities, Roundtrip-Test)
 
