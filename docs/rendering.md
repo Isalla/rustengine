@@ -9,8 +9,9 @@ playable — even in the browser.
 
 ## 0. Foundations carried by every stage
 
-* **HDR pipeline:** scene values physical (nits), tonemapping (ACES) as
-  its own post pass, exposure automatic with manual override.
+* **HDR pipeline:** scene values physical (nits), tonemapping (ACES,
+  AgX as alternative curve) as its own post pass, exposure automatic
+  with eye adaptation and manual override.
 * **Temporal data mandatory from M5:** depth and motion-vector buffers
   are part of the pipeline because upscalers, GI, reflections and
   reconstruction build on them.
@@ -29,10 +30,30 @@ playable — even in the browser.
 * G-buffer deferred lighting (albedo, normal, material IDs,
   depth+motion) for many dynamic lights; forward patch for
   transparent/emissive objects.
+* **Open decision — G-buffer layout:** classic MRT G-buffer vs.
+  visibility buffer (first pass writes only instance + primitive IDs,
+  the lighting pass reconstructs material data from bindless arrays).
+  The visibility buffer pairs with the GPU-driven path below; decide
+  before the first GPU pass lands.
+* **Render graph:** the pass chain (shadow → G-buffer → lighting → post)
+  is declared once as data; the graph schedules the passes, allocates and
+  aliases their intermediate textures and manages transitions over the
+  backend traits — backends stay dumb, the pipeline stays declarative.
 * Shadows 2.0: cascaded with stabilized texels, screen-space
   shadow-map atlas; preparing for virtual-shadow-map-style refinements
   (later stage, needs mesh streaming from M3).
-* SMAA + optional TAA; everything in WGSL over wgpu.
+* **GPU-driven draw path (after the core boxes):** bindless
+  texture/material arrays (wgpu `TEXTURE_BINDING_ARRAY` + non-uniform
+  indexing where supported), compute culling (frustum + Hi-Z occlusion
+  pyramid) writing indirect draw args; the CPU submits one multi-draw
+  per mesh batch. Falls back to the classic per-batch path wherever the
+  features are missing.
+* Watchlist: meshlets / mesh shaders (Nanite-style geometry) are still
+  experimental in wgpu; the VSM refinement above is the entry point once
+  they mature.
+* SMAA + optional TAA; everything in WGSL over wgpu. Debug path:
+  RenderDoc frame capture works out of the box on the native
+  Vulkan/DX12/Metal paths.
 * **Upscaling adapter (`re-upscale`)** — trait, backends as modules:
   * `Nis`/`Easu`-style spatial upscaler (everywhere, required fallback)
   * **FSR 2/3** (temporal + frame generation): AMD ships MIT-licensed
@@ -62,6 +83,11 @@ Two paths sharing one hookup to the surface data:
 * Reflections: chain of screenspace → SDF/RT rays → light-probe share;
   every hit lands in the surface cache so GI and reflection share the
   same energy.
+* Volumetric fog & light shafts: a froxel grid (3D texture) injected per
+  cluster by compute — atmosphere on every tier, low-resolution on
+  WebGPU.
+* Radiance Cascades: compute-only soft GI and shadows as a cheap tier
+  beside the SDF path — no ray tracing, browser-capable.
 * WebGPU tier: probes + SSAO/SSR, no rays; identical materials, lower
   effect resolution.
 * References: "Unreal Engine 5 Best Practices" and the "UE5
@@ -123,8 +149,8 @@ Two paths sharing one hookup to the surface data:
 
 | Stage | Content | Gate |
 |---|---|---|
-| M5 | deferred HDR, shadows 2.0, `re-upscale` (NIS + FSR2/3 port), motion/depth | identical scene playable on deck and desktop |
-| M6 | GI/reflections (SDF + surface cache, HW-RT option), light editor | interior scene lit correctly without bakes |
+| M5 | deferred HDR, shadows 2.0, `re-upscale` (NIS + FSR2/3 port), motion/depth, render graph, GPU-driven draw path | identical scene playable on deck and desktop |
+| M6 | GI/reflections (SDF + surface cache, HW-RT option), volumetric fog, light editor | interior scene lit correctly without bakes |
 | M7 | path tracer + reconstruction, bake outputs | still image in offline quality from the game scene |
 | M8 | GPU particles + effect graphs, audio mixer + SFX events | test scene: gunfire with light, smoke, sound |
 | M9 | WebGPU build of the signature feature | strategy→first-person camera flight in the browser |

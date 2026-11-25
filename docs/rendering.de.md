@@ -9,8 +9,9 @@ unten immer spielbar — auch im Browser.
 
 ## 0. Grundlagen, die alle Stufen tragen
 
-* **HDR-Pipeline:** Szenenwerte physikalisch (Nits), Tonemapping (ACES)
-  als eigener Post-Pass, Belichtung automatisch mit manuellem Override.
+* **HDR-Pipeline:** Szenenwerte physikalisch (Nits), Tonemapping (ACES,
+  AgX als alternative Kurve) als eigener Post-Pass, Belichtung
+  automatisch mit Augen-Adaption und manuellem Override.
 * **Temporale Daten ab M5 verpflichtend:** Tiefen- und
   Bewegungsvektor-Puffer sind Teil der Pipeline, weil Upscaler, GI,
   Reflexionen und Reconstruction darauf aufbauen.
@@ -29,10 +30,31 @@ unten immer spielbar — auch im Browser.
 * G-buffer-Deferred-Lighting (albedo, normal, material-IDs,
   Depth+Motion) für viele dynamische Lichter; Forward-Patch für
   transparente/emissive Objekte.
+* **Offene Entscheidung — G-Buffer-Layout:** klassisches MRT-G-Buffer
+  vs. Visibility Buffer (der erste Pass schreibt nur Instance- +
+  Primitive-ID, der Lighting-Pass rekonstruiert die Materialdaten aus
+  Bindless-Arrays). Der Visibility Buffer passt zum GPU-getriebenen Pfad
+  unten; entscheiden, bevor der erste GPU-Pass landet.
+* **Render-Graph:** die Pass-Kette (Shadow → G-Buffer → Lighting → Post)
+  wird einmal als Daten deklariert; der Graph plant die Pässe, verwaltet
+  ihre Zwischen-Texturen (Zuteilung und Aliasing) und die
+  Textur-Übergänge über die Backend-Traits — die Backends bleiben dumm,
+  die Pipeline bleibt deklarativ.
 * Schatten 2.0: kaskadiert mit stabilisierten Texeln, gescreente
   Schatten-Karten-Atlas; vorbereitend für Virtual-Shadow-Map-artige
   Feinheiten (spätere Stufe, braucht Mesh-Streaming aus M3).
-* SMAA + optionales TAA; alles in WGSL über wgpu.
+* **GPU-getriebener Draw-Pfad (nach den Kern-Boxen):** bindless
+  Textur-/Material-Arrays (wgpu `TEXTURE_BINDING_ARRAY` + Non-Uniform
+  Indexing, wo unterstützt), Compute-Culling (Frustum +
+  Hi-Z-Occlusion-Pyramide) schreibt Indirect-Draw-Argumente; die CPU
+  schickt ein Multi-Draw pro Mesh-Batch. Wo die Features fehlen, gilt
+  der klassische Pro-Batch-Pfad als Fallback.
+* Watchlist: Meshlets / Mesh-Shader (Nanite-artige Geometrie) sind in
+  wgpu noch experimentell; die VSM-Feinheiten oben sind der
+  Einstiegspunkt, sobald sie reif sind.
+* SMAA + optionales TAA; alles in WGSL über wgpu. Debug-Pfad:
+  RenderDoc-Frame-Capture funktioniert auf den nativen
+  Vulkan/DX12/Metal-Pfaden ohne Zusatzarbeit.
 * **Upscaling-Adapter (`re-upscale`)** — Trait, Backends als Module:
   * `Nis`/`Easu`-artiger räumlicher Upscaler (überall, Pflicht-Fallback)
   * **FSR 2/3** (zeitlich + Frame Generation): AMD liefert MIT-lizenzierte
@@ -64,6 +86,11 @@ Zwei Pfade mit gemeinsamer Anbindung an die Oberflächendaten:
 * Reflexionen: Kette aus Screenspace → SDF/RT-Strahlen →
   Light-Probe-Anteil; jeder Treffer endet im Surface-Cache, damit GI
   und Reflexion dieselbe Energie teilen.
+* Volumetrischer Nebel & Lichtschächte: ein Foxel-Raster (3D-Textur),
+  pro Cluster per Compute injiziert — Atmosphäre auf jeder Stufe, auf
+  WebGPU in niedriger Auflösung.
+* Radiance Cascades: weiche GI und Schatten rein per Compute als günstige
+  Stufe neben dem SDF-Pfad — ohne Ray-Tracing, browserfähig.
 * WebGPU-Stufe: Probes + SSAO/SSR, keine Strahlen; identische
   Materialien, weniger Auflösung der Effekte.
 * Referenzen: „Unreal Engine 5 Best Practices" und
@@ -128,8 +155,8 @@ Zwei Pfade mit gemeinsamer Anbindung an die Oberflächendaten:
 
 | Stufe | Inhalt | Gate |
 |---|---|---|
-| M5 | Deferred HDR, Schatten 2.0, `re-upscale` (NIS + FSR2/3-Port), Motion/Depth | identische Szene spieltbar auf Deck und Desktop |
-| M6 | GI/Reflexionen (SDF+Surface-Cache, HW-RT-Option), Licht-Editor | innere Szene ohne Bakes korrekt ausgeleuchtet |
+| M5 | Deferred HDR, Schatten 2.0, `re-upscale` (NIS + FSR2/3-Port), Motion/Depth, Render-Graph, GPU-getriebener Draw-Pfad | identische Szene spieltbar auf Deck und Desktop |
+| M6 | GI/Reflexionen (SDF+Surface-Cache, HW-RT-Option), volumetrischer Nebel, Licht-Editor | innere Szene ohne Bakes korrekt ausgeleuchtet |
 | M7 | Pfad-Tracer + Rekonstruktion, Bake-Ausgaben | Standbild in Offline-Qualität aus Spiel-Szene |
 | M8 | GPU-Partikel + Effekt-Graphen, Audio-Mixer + SFX-Events | Testszene: Beschuss mit Licht, Rauch, Sound |
 | M9 | WebGPU-Build des Leitfeatures | Kameraflug Strategie→Ego im Browser |

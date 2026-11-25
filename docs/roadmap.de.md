@@ -91,12 +91,22 @@ mit ehrlichem Haken-Stand. ✅ fertig und testabgedeckt · 🟡 teilweise gebaut
 - [ ] Deferred-HDR-Pipeline
 - [ ] Shadow 2.0 (kaskadiert + geclustert)
 - [ ] Upscaling-Adapter: FSR / XeSS / DLSS ([rendering.de](rendering.de.md))
+- [ ] Render-Graph: die Pass-Kette (Shadow → G-Buffer → Lighting → Post)
+      einmal deklarieren; der Graph plant sie und verwaltet
+      Textur-Übergänge/Aliasing über die Backend-Traits
+- [ ] GPU-getriebener Draw-Pfad (nach den Kern-Boxen): bindless
+      Textur-/Material-Arrays, Compute-Culling (Frustum + Hi-Z-Occlusion)
+      schreibt Indirect-Draw-Argumente, ein Multi-Draw pro Mesh-Batch
 
 ## M6 — Dynamische GI & Reflexionen ⬜
 
 - [ ] Lumen-artiger Software-Raytracing-Pfad
 - [ ] Hardware-RT als optionaler Qualitätsschalter
 - [ ] `re-native`-Backend für Hersteller-RT-Stacks
+- [ ] Volumetrischer Nebel & Lichtschächte (Foxel-Raster, pro Cluster per
+      Compute injiziert; Niedrigauflösungs-Stufe läuft auf WebGPU)
+- [ ] Radiance Cascades als günstige GI-Stufe (Compute-only, weiche
+      GI/Schatten ohne Hardware-RT, browserfähig)
 
 ## M7 — Pfad-Tracing ⬜
 
@@ -158,6 +168,7 @@ aufrufen kann — und ein Satz ersetzt hundert Klicks.*
 - [ ] VFX-Editor auf `re-vfx`-Graphen; Audio-Editor auf `re-audio`-
       Events; Navigations- & KI-Werkzeuge (Navmesh, Verhaltensgraphen)
 - [ ] Profiler & Frame-Debugger auf der Render-/GPU-Telemetrie
+      (GPU-Zeit je Pass über wgpu-Timestamp-Queries)
 
 **KI-Inhaltspipelines (Provider hinter Traits, Ergebnisse werden
 normale Assets — der Simulationskern bleibt deterministisch)**

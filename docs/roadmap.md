@@ -88,12 +88,22 @@ honest state of repair. ✅ done and test-covered · 🟡 partially built ·
 - [ ] Deferred HDR pipeline
 - [ ] Shadow 2.0 (cascaded + clustered)
 - [ ] Upscaling adapters: FSR / XeSS / DLSS ([rendering](rendering.md))
+- [ ] Render graph: declare the pass chain (shadow → G-buffer → lighting
+      → post) once; the graph schedules it and manages texture
+      transitions/aliasing over the backend traits
+- [ ] GPU-driven draw path (after the core boxes): bindless texture/
+      material arrays, compute culling (frustum + Hi-Z occlusion) writing
+      indirect draw args, one multi-draw per mesh batch
 
 ## M6 — Dynamic GI & reflections ⬜
 
 - [ ] Lumen-style software ray-tracing path
 - [ ] Hardware RT as optional quality switch
 - [ ] `re-native` backend for vendor RT stacks
+- [ ] Volumetric fog & light shafts (froxel grid, compute-injected per
+      cluster; low-res tier runs on WebGPU)
+- [ ] Radiance Cascades as a cheap GI tier (compute-only soft GI/shadows,
+      no hardware RT, browser-capable)
 
 ## M7 — Path tracing ⬜
 
@@ -153,6 +163,7 @@ one sentence can drive what used to take a hundred clicks.*
 - [ ] VFX editor over `re-vfx` graphs; audio editor over `re-audio`
       events; navigation & AI tools (navmesh, behavior graphs)
 - [ ] Profiler & frame debugger reading the render/GPU telemetry
+      (per-pass GPU timing via wgpu timestamp queries)
 
 **AI content pipelines (providers behind traits, results baked as
 normal assets — the simulation core stays deterministic)**
