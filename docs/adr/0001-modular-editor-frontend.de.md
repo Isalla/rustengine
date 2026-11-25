@@ -7,7 +7,8 @@
 - **Entscheider:** Waldemar Friesen (Produkt), RE-Engine-Team
 - **Bezug:** [architecture.de.md](../architecture.de.md),
   [ki-integration.de.md](../ki-integration.de.md) (Regel der doppelten
-  Adressierbarkeit), Roadmap M4 (Editor)
+  Adressierbarkeit), [ADR-0002](0002-authoring-surfaces-and-ai-assistant.de.md)
+  (Autor-Oberflächen auf diesem Frontend), Roadmap M4 (Editor)
 
 ## Kontext
 

@@ -7,7 +7,8 @@ English | [Deutsch](0001-modular-editor-frontend.de.md)
 - **Deciders:** Waldemar Friesen (product), RE engine team
 - **Relates to:** [architecture.md](../architecture.md),
   [ki-integration.md](../ki-integration.md) (rule of double addressability),
-  roadmap M4 (editor)
+  [ADR-0002](0002-authoring-surfaces-and-ai-assistant.md) (authoring
+  surfaces over this frontend), roadmap M4 (editor)
 
 ## Context
 
