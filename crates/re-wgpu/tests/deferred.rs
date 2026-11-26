@@ -1,12 +1,15 @@
-//! Beweis für ADR-0003 Box 1: der GPU-G-Buffer (MRT, WGSL) liefert
-//! dieselben Pixel wie die CPU-Referenz `GBufferLayout::pack()`, und
-//! der Lighting-Pass dieselben Farben wie `unpack()` + Lambert auf der
-//! CPU. Laedt den Software-Adapter (llvmpipe) — laeuft headless auf dem
-//! Pi und in der CI.
+//! Beweis für ADR-0003 Box 1 + HDR-Aufsatz: der GPU-G-Buffer (MRT,
+//! WGSL) liefert dieselben Pixel wie die CPU-Referenz
+//! `GBufferLayout::pack()`; der Lighting-Pass schreibt ein HDR-Float-
+//! Ziel, das Werte ueber 1.0 erhaelt (CPU-Vergleich in Float-
+//! Praezision); der Tone-Mapping-Pass endet bei densben Display-
+//! Farben wie `HdrPipeline::process()` auf der CPU. Laedt den
+//! Software-Adapter (llvmpipe) — laeuft headless auf dem Pi und in
+//! der CI.
 
 use re_core::mesh::Mesh;
-use re_render::{linear_to_srgb, Camera, GBufferLayout, GfxBackend, Surface};
-use re_wgpu::{DeferredBatch, WgpuBackend};
+use re_render::{Camera, GBufferLayout, GfxBackend, HdrPipeline, Surface, ToneCurve};
+use re_wgpu::{DeferredBatch, DeferredHdr, WgpuBackend};
 
 fn quad(normal: [f32; 3]) -> Mesh {
     Mesh {
@@ -110,13 +113,16 @@ fn gpu_gbuffer_und_lighting_matchen_cpu_referenz() {
         },
     ];
 
-    be.render_deferred(&cam, &batches).expect("render_deferred");
+    let hdr = DeferredHdr { exposure: 1.0, light_intensity: 5.0, curve: ToneCurve::Aces };
+    be.render_deferred(&cam, &batches, hdr).expect("render_deferred");
     let gb = be.read_gbuffer().expect("read_gbuffer");
+    let hdr_rb = be.read_hdr().expect("read_hdr");
     let (fw, fh, final_rgba) = be.read_deferred_rgba().expect("readback final");
     assert_eq!((fw, fh), (64, 64));
 
     let layout = GBufferLayout::deferred_v1();
     let light = glam::Vec3::new(0.45, 0.82, 0.35).normalize();
+    let pipe = HdrPipeline { exposure: hdr.exposure, curve: hdr.curve };
 
     // (1) G-Buffer: GPU-Pixel == CPU-pack(), Kanal fuer Kanal.
     for (label, x, y, s) in [
@@ -142,7 +148,11 @@ fn gpu_gbuffer_und_lighting_matchen_cpu_referenz() {
         assert_eq!(vel, [0.0, 0.0], "{label} Velocity muss 0 sein (statisch)");
     }
 
-    // (2) Lighting: GPU-Farbe == CPU-Referenz aus denselben Bytes.
+    // (2) HDR-Ziel + Tone-Mapping: GPU == CPU-Referenz aus denselben
+    // G-Buffer-Bytes. Der Float-Kanal beweist echtes HDR: Werte ueber
+    // 1.0 ueberleben das Lighting-Ziel und werden erst vom Tone-Mapper
+    // gestaucht — ein 8-Bit-Ziel koennte das nicht.
+    let mut hdr_max = 0.0f32;
     for (x, y) in [(32u32, 32u32), (4, 4), (60, 60)] {
         let vel = gb.velocity(x, y);
         let surf = layout.unpack(&[
@@ -151,17 +161,32 @@ fn gpu_gbuffer_und_lighting_matchen_cpu_referenz() {
             [vel[0], vel[1], 0.0, 0.0],
         ]);
         let ndl = surf.normal.dot(light).max(0.0);
+        let linear: [f32; 3] =
+            surf.albedo.map(|c| c * (0.1 + 0.9 * ndl) * hdr.light_intensity);
+        let gpu_hdr = hdr_rb.pixel(x, y);
+        for k in 0..3 {
+            assert!(
+                (gpu_hdr[k] - linear[k]).abs() <= 1e-4,
+                "hdr({x},{y})[{k}]: gpu {} vs cpu {}",
+                gpu_hdr[k],
+                linear[k]
+            );
+            hdr_max = hdr_max.max(gpu_hdr[k]);
+        }
+        // Tonemapped + sRGB (der Display-Weg aus hdr.rs, identische Kurve).
+        let want = pipe.process(linear);
         let i = ((y * fw + x) * 4) as usize;
         for k in 0..3 {
-            let want = linear_to_srgb(surf.albedo[k] * (0.1 + 0.9 * ndl));
             let got = final_rgba[i + k] as f32 / 255.0;
             assert!(
-                (got - want).abs() <= TOL,
-                "final({x},{y})[{k}]: gpu {got} vs cpu {want}"
+                (got - want[k]).abs() <= TOL,
+                "final({x},{y})[{k}]: gpu {got} vs cpu {}",
+                want[k]
             );
         }
         assert_eq!(final_rgba[i + 3], 255, "Alpha deckend");
     }
+    assert!(hdr_max > 1.0, "HDR-Beweis: mindestens ein Kanal muss ueber 1.0 liegen (max {hdr_max})");
 
     // (3) Tiefen-Beweis: in der Mitte gewinnt der Wuerfel (andere ID).
     assert_eq!(gb.t1_f32(32, 32)[3] * 255.0, 173.0, "Mitte muss den Wuerfel zeigen");

@@ -88,6 +88,16 @@ fn fs_geometry(i : GpOut) -> GBufferOut {
 @group(1) @binding(2) var gb2 : texture_2d<f32>;
 @group(1) @binding(3) var samp : sampler;
 
+// Post-Uniform: Belichtung + Kurvenwahl. Dieselben Felder nutzt der
+// Tone-Mapping-Pass; der Lighting-Pass braucht nur light_intensity.
+struct Post {
+    exposure : f32,
+    light_intensity : f32,
+    curve : f32,   // 0 = Reinhard, 1 = ReinhardExtended, 2 = ACES
+    white : f32,   // Weißpunkt für ReinhardExtended
+};
+@group(1) @binding(4) var<uniform> post : Post;
+
 @vertex
 fn vs_fullscreen(@builtin(vertex_index) vi : u32) -> @builtin(position) vec4<f32> {
     // Spannt das Viewport-Rechteck in einem Dreieck auf (Standard-Trick).
@@ -125,7 +135,59 @@ fn fs_light(@builtin(position) frag : vec4<f32>) -> @location(0) vec4<f32> {
     let s = surface_at(vec2<u32>(u32(frag.x), u32(frag.y)));
     // Erster Beleuchtungs-Beweis: Lambert + konstanter Ambient. Die
     // volle BRDF (Cluster-Lichter, Specular) folgt mit dem Licht-Pass.
+    // Das Ziel ist ein Float-Target: Werte ueber 1.0 ueberleben bis
+    // zum Tone-Mapping — das ist der HDR-Beweis dieser Kette.
     let ndl = max(dot(s.normal, normalize(cam.light_dir_time.xyz)), 0.0);
-    let c = s.albedo * (0.1 + 0.9 * ndl);
+    let c = s.albedo * (0.1 + 0.9 * ndl) * post.light_intensity;
     return vec4<f32>(c, 1.0);
+}
+
+// ── Tone-Mapping-Pass (HDR-float → Display-linear → sRGB-Target) ────
+// Die Kurven sind Kanal-fuer-Kanal die gespiegelte CPU-Referenz aus
+// re_render::hdr (ACES = Narkowicz; AgX folgt, wenn gespiegelt). Das
+// Ziel-Format ist Rgba8UnormSrgb — die Hardware uebernimmt das
+// sRGB-Encoding, der Shader liefert display-lineare Werte.
+@group(0) @binding(0) var hdr_tex : texture_2d<f32>;
+@group(0) @binding(1) var<uniform> post_t : Post;
+
+fn tm_reinhard(x : f32) -> f32 {
+    return x / (1.0 + x);
+}
+
+fn tm_reinhard_ext(x : f32, white : f32) -> f32 {
+    let w = max(white, 1e-3);
+    return (x * (1.0 + x / (w * w))) / (1.0 + x);
+}
+
+fn tm_aces(x : f32) -> f32 {
+    // (x*(2.51x+0.03)) / (x*(2.43x+0.59)+0.14) — hdr.rs, Konstanten identisch.
+    return (x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14);
+}
+
+fn tonemap_channel(x : f32) -> f32 {
+    if (x <= 0.0) {
+        return 0.0;
+    }
+    var y : f32;
+    if (post_t.curve < 0.5) {
+        y = tm_reinhard(x);
+    } else if (post_t.curve < 1.5) {
+        y = tm_reinhard_ext(x, post_t.white);
+    } else {
+        y = tm_aces(x);
+    }
+    return clamp(y, 0.0, 1.0);
+}
+
+@fragment
+fn fs_tonemap(@builtin(position) frag : vec4<f32>) -> @location(0) vec4<f32> {
+    let coords = vec2<u32>(u32(frag.x), u32(frag.y));
+    let c = textureLoad(hdr_tex, coords, 0);
+    let exposed = c.rgb * post_t.exposure;
+    let mapped = vec3<f32>(
+        tonemap_channel(exposed.x),
+        tonemap_channel(exposed.y),
+        tonemap_channel(exposed.z),
+    );
+    return vec4<f32>(mapped, c.a);
 }

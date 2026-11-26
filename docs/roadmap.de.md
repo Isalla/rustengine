@@ -100,8 +100,11 @@ mit ehrlichem Haken-Stand. ✅ fertig und testabgedeckt · 🟡 teilweise gebaut
 - [x] Deferred-Pipeline: MRT-G-Buffer (`deferred_v1`) + Lighting-Pass über
       die abstrakte `surface_at`-Schnittstelle — GPU-Ausgabe per Pixel-Diff
       gegen die CPU-Referenz verifiziert (ADR-0003, `re-wgpu/tests/deferred.rs`)
-- [ ] HDR-Beleuchtung darauf: Float-Render-Ziele, geclusterte Lichter,
-      Tone Mapping
+- [x] HDR-Float-Ziele + Tone Mapping: der Lighting-Pass schreibt ein
+      RGBA32F-Ziel (Werte > 1,0 ueberleben), ein Tone-Mapping-Pass
+      spiegelt die Kurven aus `re-render::hdr` in WGSL (ACES/Reinhard;
+      AgX noch offen) — Pixel-Diff-verifiziert gegen `HdrPipeline::process()`
+- [ ] Geclusterte Lichter im Deferred-Lighting-Pass
 - [ ] Shadow 2.0 (kaskadiert + geclustert)
 - [ ] Upscaling-Adapter: FSR / XeSS / DLSS ([rendering.de](rendering.de.md))
 - [ ] Render-Graph: die Pass-Kette (Shadow → G-Buffer → Lighting → Post)

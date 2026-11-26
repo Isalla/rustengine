@@ -1,4 +1,5 @@
-//! Deferred-Pipeline V2 (M5, Box 1): MRT-G-Buffer + Lighting-Pass.
+//! Deferred-Pipeline V2 (M5, Box 1 + HDR-Aufsatz): MRT-G-Buffer +
+//! Lighting-Pass (HDR-Float) + Tone-Mapping.
 //!
 //! Beweis-Strecke für ADR-0003: der Geometrie-Pass schreibt das Layout
 //! `GBufferLayout::deferred_v1()` (Albedo+Metallic, Oktaeder-Normalen+
@@ -11,7 +12,7 @@
 //! liefert das PNG als Sichtbeleg.
 
 use re_core::mesh::Mesh;
-use re_render::{Camera, GfxError};
+use re_render::{Camera, GfxError, ToneCurve};
 
 const DEFERRED_SHADER: &str = include_str!("../deferred.wgsl");
 
@@ -64,6 +65,85 @@ pub struct DeferredBatch<'a> {
     pub metallic: f32,
     pub roughness: f32,
     pub material_id: u8,
+}
+
+/// HDR-Einstellungen der Deferred-Kette (M5-HDR-Aufsatz). Der
+/// Lighting-Pass schreibt ein Float-Target (Werte > 1 ueberleben),
+/// der Tone-Mapping-Pass staucht mit derselben Kurve wie die
+/// CPU-Referenz `re_render::hdr`.
+#[derive(Clone, Copy, Debug)]
+pub struct DeferredHdr {
+    /// Belichtungs-Multiplikator (siehe `hdr::exposure_from_ev100`).
+    pub exposure: f32,
+    /// Intensitaet der Umgebungslicht-Formel — > 1 erzeugt echtes HDR.
+    pub light_intensity: f32,
+    /// Tone-Mapping-Kurve. AgX ist in WGSL noch nicht gespiegelt und
+    /// wird mit einem Fehler abgewiesen (ehrlich statt ACES-Fallback).
+    pub curve: ToneCurve,
+}
+
+impl Default for DeferredHdr {
+    fn default() -> Self {
+        Self { exposure: 1.0, light_intensity: 1.0, curve: ToneCurve::default() }
+    }
+}
+
+/// WGSL-Seite des Post-Uniforms (Reihenfolge = `struct Post` im Shader).
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct PostUni {
+    exposure: f32,
+    light_intensity: f32,
+    /// 0 = Reinhard, 1 = ReinhardExtended, 2 = ACES — identisch zur
+    /// Kurvenauswahl im Shader.
+    curve: f32,
+    white: f32,
+}
+
+impl DeferredHdr {
+    fn to_uni(&self) -> Result<PostUni, GfxError> {
+        let (curve, white) = match self.curve {
+            ToneCurve::Reinhard => (0.0, 0.0),
+            ToneCurve::ReinhardExtended { white } => (1.0, white),
+            ToneCurve::Aces => (2.0, 0.0),
+            ToneCurve::Agx => {
+                return Err(GfxError::Device(
+                    "AgX-Kurve in WGSL noch nicht gespiegelt (CPU-Referenz existiert)".into(),
+                ))
+            }
+        };
+        Ok(PostUni {
+            exposure: self.exposure,
+            light_intensity: self.light_intensity,
+            curve,
+            white,
+        })
+    }
+}
+
+/// Roh-Inhalt des HDR-Float-Targets (RGBA32F) nach einem Frame.
+/// 16 Byte/Pixel; der Beweis, dass Werte ueber 1.0 die Kette
+/// durchlaufen — ein 8-Bit-Ziel koennte das nicht.
+pub struct HdrReadback {
+    pub width: u32,
+    pub height: u32,
+    data: Vec<u8>,
+}
+
+impl HdrReadback {
+    /// Pixel als RGBA-f32 (Rohwert des Float-Targets, ungetoont).
+    pub fn pixel(&self, x: u32, y: u32) -> [f32; 4] {
+        let i = ((y * self.width + x) * 16) as usize;
+        let f = |k: usize| {
+            f32::from_bits(u32::from_le_bytes([
+                self.data[i + k * 4],
+                self.data[i + k * 4 + 1],
+                self.data[i + k * 4 + 2],
+                self.data[i + k * 4 + 3],
+            ]))
+        };
+        [f(0), f(1), f(2), f(3)]
+    }
 }
 
 /// Roh-Inhalt der G-Buffer-Targets nach einem Frame (Readback).
@@ -133,9 +213,16 @@ pub(crate) struct Deferred {
     #[allow(dead_code)] // dito: final_tex naehrt final_view
     final_tex: wgpu::Texture,
     final_view: wgpu::TextureView,
+    /// HDR-Ziel des Lighting-Passes (RGBA32F, linear, Werte > 1).
+    #[allow(dead_code)] // bleibt alive, solange hdr_view referenziert wird
+    hdr: wgpu::Texture,
+    hdr_view: wgpu::TextureView,
+    post_buf: wgpu::Buffer,
+    post_bind: wgpu::BindGroup,
     light_bind: wgpu::BindGroup,
     pipe_geometry: wgpu::RenderPipeline,
     pipe_light: wgpu::RenderPipeline,
+    pipe_tonemap: wgpu::RenderPipeline,
     size: (u32, u32),
 }
 
@@ -199,6 +286,34 @@ impl Deferred {
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
                     count: None,
                 },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 4,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+        });
+        // g0 (Tonemap): HDR-Textur + Post-Uniform (eigene Pipeline-Layout-
+        // Gruppe, der Pass braucht keine Kamera).
+        let g_post = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("d-g0-post"),
+            entries: &[
+                tex_entry(0),
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
             ],
         });
 
@@ -215,6 +330,12 @@ impl Deferred {
                 binding: 0,
                 resource: cam_buf.as_entire_binding(),
             }],
+        });
+        let post_buf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("d-post-uni"),
+            size: std::mem::size_of::<PostUni>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
         });
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("d-point"),
@@ -239,8 +360,8 @@ impl Deferred {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             view_formats: &[],
         });
-        // Ziel des Lighting-Passes: sRGB wie der Forward-Offscreen-Pfad,
-        // damit readback_rgba() unverändert das Endergebnis liefert.
+        // Ziel des Tone-Mapping-Passes: sRGB wie der Forward-Offscreen-
+        // Pfad, damit read_deferred_rgba() das Endergebnis liefert.
         let final_tex = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("d-final"),
             size: wgpu::Extent3d { width: w.max(1), height: h.max(1), depth_or_array_layers: 1 },
@@ -251,11 +372,29 @@ impl Deferred {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
             view_formats: &[],
         });
+        // HDR-Ziel des Lighting-Passes: RGBA32F statt RGBA16F, weil
+        // wgpu das Sampeln von 16F-Targets die instabile f16-Feature
+        // abverlangt — 32F laeuft ueberall (auch Software-Adapter/CI)
+        // und die Testgroesse ist Speicher-egal. Desktop-Tier darf spaeter
+        // auf 16F wechseln (Format ist eine Profil-Entscheidung, M13).
+        let hdr = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("d-hdr"),
+            size: wgpu::Extent3d { width: w.max(1), height: h.max(1), depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba32Float,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                | wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
         let gb0_view = gb0.create_view(&wgpu::TextureViewDescriptor::default());
         let gb1_view = gb1.create_view(&wgpu::TextureViewDescriptor::default());
         let gb2_view = gb2.create_view(&wgpu::TextureViewDescriptor::default());
         let depth_view = depth.create_view(&wgpu::TextureViewDescriptor::default());
         let final_view = final_tex.create_view(&wgpu::TextureViewDescriptor::default());
+        let hdr_view = hdr.create_view(&wgpu::TextureViewDescriptor::default());
 
         let light_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("d-light-bind"),
@@ -265,6 +404,15 @@ impl Deferred {
                 wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&gb1_view) },
                 wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&gb2_view) },
                 wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::Sampler(&sampler) },
+                wgpu::BindGroupEntry { binding: 4, resource: post_buf.as_entire_binding() },
+            ],
+        });
+        let post_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("d-post-bind"),
+            layout: &g_post,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&hdr_view) },
+                wgpu::BindGroupEntry { binding: 1, resource: post_buf.as_entire_binding() },
             ],
         });
 
@@ -276,6 +424,11 @@ impl Deferred {
         let layout_light = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("d-layout-light"),
             bind_group_layouts: &[Some(&g0), Some(&g1_light)],
+            immediate_size: 0,
+        });
+        let layout_tonemap = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("d-layout-tonemap"),
+            bind_group_layouts: &[Some(&g_post)],
             immediate_size: 0,
         });
 
@@ -350,6 +503,35 @@ impl Deferred {
                 entry_point: Some("fs_light"),
                 compilation_options: Default::default(),
                 targets: &[Some(wgpu::ColorTargetState {
+                    format: wgpu::TextureFormat::Rgba32Float,
+                    blend: None,
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            multiview_mask: None,
+            cache: None,
+        });
+
+        let pipe_tonemap = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("d-tonemap"),
+            layout: Some(&layout_tonemap),
+            vertex: wgpu::VertexState {
+                module: &module,
+                entry_point: Some("vs_fullscreen"),
+                compilation_options: Default::default(),
+                buffers: &[],
+            },
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                ..Default::default()
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            fragment: Some(wgpu::FragmentState {
+                module: &module,
+                entry_point: Some("fs_tonemap"),
+                compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState {
                     format: wgpu::TextureFormat::Rgba8UnormSrgb,
                     blend: None,
                     write_mask: wgpu::ColorWrites::ALL,
@@ -373,9 +555,14 @@ impl Deferred {
             depth_view,
             final_tex,
             final_view,
+            hdr,
+            hdr_view,
+            post_buf,
+            post_bind,
             light_bind,
             pipe_geometry,
             pipe_light,
+            pipe_tonemap,
             size: (w.max(1), h.max(1)),
         }
     }
@@ -409,22 +596,26 @@ impl Deferred {
         })
     }
 
-    /// Ein Frame: Geometrie-Pass (MRT) → Lighting-Pass (Fullscreen) →
-    /// `final_tex`. Ruft vorher `resize` auf, wenn die Größe wechselt.
+    /// Ein Frame: Geometrie-Pass (MRT) → Lighting-Pass (→ HDR-Float) →
+    /// Tone-Mapping (→ `final_tex`). Ruft vorher `resize` auf, wenn die
+    /// Größe wechselt.
     pub(crate) fn render(
         &mut self,
         inner: &mut Inner,
         camera: &Camera,
         batches: &[DeferredBatch],
+        hdr: DeferredHdr,
     ) -> Result<(), GfxError> {
         if self.size != inner.size {
             self.resize(inner);
         }
+        let post = hdr.to_uni()?;
         let cam = CamUni {
             view_proj: crate::mat4(camera.view_proj()),
             light_dir_time: [LIGHT_DIR[0], LIGHT_DIR[1], LIGHT_DIR[2], 0.0],
         };
         inner.queue.write_buffer(&self.cam_buf, 0, pod_bytes(&cam));
+        inner.queue.write_buffer(&self.post_buf, 0, pod_bytes(&post));
 
         // Batches vorbereiten (Mesh-Upload + Uniform + Bind-Group).
         struct Prep {
@@ -526,7 +717,7 @@ impl Deferred {
             let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("d-light"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &self.final_view,
+                    view: &self.hdr_view,
                     depth_slice: None,
                     resolve_target: None,
                     ops: wgpu::Operations {
@@ -542,6 +733,25 @@ impl Deferred {
             pass.set_bind_group(1, &self.light_bind, &[]);
             pass.draw(0..3, 0..1);
         }
+        {
+            let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("d-tonemap"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &self.final_view,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                ..Default::default()
+            });
+            pass.set_pipeline(&self.pipe_tonemap);
+            pass.set_bind_group(0, &self.post_bind, &[]);
+            pass.draw(0..3, 0..1);
+        }
         queue.submit([enc.finish()]);
         Ok(())
     }
@@ -551,6 +761,17 @@ impl Deferred {
     pub(crate) fn read_final(&self, inner: &Inner) -> Result<Vec<u8>, GfxError> {
         let (w, h) = self.size;
         crate::readback_texture(&inner.device, &inner.queue, &self.final_tex, w, h, 4)
+    }
+
+    /// Roh-Inhalt des HDR-Float-Targets vor dem Tone-Mapping — der
+    /// Beweis-Kanal fuer Werte ueber 1.0.
+    pub(crate) fn read_hdr(&self, inner: &Inner) -> Result<HdrReadback, GfxError> {
+        let (w, h) = self.size;
+        Ok(HdrReadback {
+            width: w,
+            height: h,
+            data: crate::readback_texture(&inner.device, &inner.queue, &self.hdr, w, h, 16)?,
+        })
     }
 
     /// G-Buffer-Targets auslesen (für den Pixel-Diff gegen die

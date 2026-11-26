@@ -26,7 +26,7 @@ use re_render::{Camera, DrawBatch, GfxBackend, GfxError};
 
 pub mod deferred;
 
-pub use deferred::{DeferredBatch, GBufferReadback};
+pub use deferred::{DeferredBatch, DeferredHdr, GBufferReadback, HdrReadback};
 use deferred::Deferred;
 
 const SHADER: &str = include_str!("../shader.wgsl");
@@ -586,6 +586,7 @@ impl WgpuBackend {
         &mut self,
         camera: &Camera,
         batches: &[DeferredBatch],
+        hdr: DeferredHdr,
     ) -> Result<(), GfxError> {
         let inner = self
             .inner
@@ -597,7 +598,7 @@ impl WgpuBackend {
         self.deferred
             .as_mut()
             .expect("gerade erzeugt")
-            .render(inner, camera, batches)?;
+            .render(inner, camera, batches, hdr)?;
         self.frames += 1;
         Ok(())
     }
@@ -613,6 +614,20 @@ impl WgpuBackend {
             .as_ref()
             .ok_or_else(|| GfxError::Device("kein Deferred-Frame gerendert".into()))?;
         d.read_gbuffer(inner)
+    }
+
+    /// Roh-Inhalt des HDR-Float-Targets (vor Tone-Mapping) des letzten
+    /// Deferred-Frames — fuer den Pixel-Diff gegen die CPU-Referenz.
+    pub fn read_hdr(&self) -> Result<HdrReadback, GfxError> {
+        let inner = self
+            .inner
+            .as_ref()
+            .ok_or_else(|| GfxError::Device("init nicht ausgeführt".into()))?;
+        let d = self
+            .deferred
+            .as_ref()
+            .ok_or_else(|| GfxError::Device("kein Deferred-Frame gerendert".into()))?;
+        d.read_hdr(inner)
     }
 
     /// Das beleuchtete Deferred-Ergebnis als RGBA8 (Zeilen ohne

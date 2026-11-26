@@ -97,8 +97,11 @@ honest state of repair. ✅ done and test-covered · 🟡 partially built ·
 - [x] Deferred pipeline: MRT G-buffer (`deferred_v1`) + lighting pass over
       the abstract `surface_at` interface — GPU output pixel-diff verified
       against the CPU reference (ADR-0003, `re-wgpu/tests/deferred.rs`)
-- [ ] HDR lighting on top: float render targets, clustered lights,
-      tone mapping
+- [x] HDR float targets + tone mapping: the lighting pass writes an
+      RGBA32F target (values > 1.0 survive), a tone-mapping pass mirrors
+      the `re-render::hdr` curves in WGSL (ACES/Reinhard; AgX pending
+      its mirror) — pixel-diff verified against `HdrPipeline::process()`
+- [ ] Clustered lights in the deferred lighting pass
 - [ ] Shadow 2.0 (cascaded + clustered)
 - [ ] Upscaling adapters: FSR / XeSS / DLSS ([rendering](rendering.md))
 - [ ] Render graph: declare the pass chain (shadow → G-buffer → lighting
