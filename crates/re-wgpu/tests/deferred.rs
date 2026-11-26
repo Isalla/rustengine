@@ -149,7 +149,7 @@ fn gpu_gbuffer_und_lighting_matchen_cpu_referenz() {
     ];
 
     let hdr = DeferredHdr { exposure: 1.0, light_intensity: 5.0, curve: ToneCurve::Aces };
-    be.render_deferred(&cam, &batches, hdr, &lights, None).expect("render_deferred");
+    be.render_deferred(&cam, &batches, hdr, &lights, None, None).expect("render_deferred");
     let gb = be.read_gbuffer().expect("read_gbuffer");
     let hdr_rb = be.read_hdr().expect("read_hdr");
     let depth = be.read_deferred_depth().expect("read_deferred_depth");

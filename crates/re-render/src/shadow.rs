@@ -217,8 +217,13 @@ pub fn project_shadow(fit: &CascadeFit, world: Vec3) -> [f32; 3] {
 }
 
 /// Ein PCF-Tap: Hardware-Vergleich mit bilinearen Gewichten — vier
-/// Texelvergleiche (`Texel <= Referenz` => beleuchtet), bilinear
-/// gemischt, Randklemmung wie ClampToEdge.
+/// Texelvergleiche (`Referenz <= Texel` => beleuchtet), bilinear
+/// gemischt, Randklemmung wie ClampToEdge. Die Richtung ist die
+/// Hardware-Konvention des Depth-Compare-Samplers mit `LessEqual`
+/// (wgpu vergleicht `Referenz COMPARE Texel`): die Map haelt den
+/// *naechsten* Blocker, beleuchtet ist nur, wer selbst naeher an der
+/// Lichtquelle liegt (oder exakt gleich tief ist — Selbstaequivalenz
+/// ohne Bias).
 fn compare_bilinear(map: &[f32], size: usize, uv: [f32; 2], reference: f32) -> f32 {
     // Texelmittelpunkte liegen bei (i + 0.5) / size.
     let x = uv[0] * size as f32 - 0.5;
@@ -228,7 +233,7 @@ fn compare_bilinear(map: &[f32], size: usize, uv: [f32; 2], reference: f32) -> f
     let tap = |ix: f32, iy: f32| -> f32 {
         let cx = (ix as i64).clamp(0, size as i64 - 1) as usize;
         let cy = (iy as i64).clamp(0, size as i64 - 1) as usize;
-        (map[cy * size + cx] <= reference) as u8 as f32
+        (reference <= map[cy * size + cx]) as u8 as f32
     };
     let a = tap(x0, y0) * (1.0 - fx) + tap(x0 + 1.0, y0) * fx;
     let b = tap(x0, y0 + 1.0) * (1.0 - fx) + tap(x0 + 1.0, y0 + 1.0) * fx;
@@ -258,8 +263,10 @@ pub fn pcf_box3x3(map: &[f32], size: usize, uv: [f32; 2], reference: f32) -> f32
 /// Tiefen-Bias aus der Flaechenorientierung: konstanter Sockel plus
 /// Neigungsanteil — streifende Flaechen brauchen mehr. `normal` und
 /// `light_dir` (Fallrichtung) normiert; rueckwaerts orientierte
-/// Normalen klemmen auf den groessten Bias. Die Normalen-Offset-
-/// Verschiebung des Welt-Punkts macht der Aufrufer (vor `project_shadow`).
+/// Normalen klemmen auf den groessten Bias. Der Aufrufer zieht den
+/// Wert von der Referenz-Tiefe ab (verschiebt den Empfaenger Richtung
+/// Licht — sonst schattet er sich selbst, Acne); die Normalen-Offset-
+/// Verschiebung des Welt-Punkts macht er selbst (vor `project_shadow`).
 pub fn depth_bias(normal: Vec3, light_dir: Vec3, constant: f32, slope: f32) -> f32 {
     let ndotl = normal.dot(-light_dir).clamp(0.0, 1.0);
     constant + slope * (1.0 - ndotl)
@@ -459,23 +466,27 @@ mod tests {
     fn pcf_konstante_map_hart_wahr_oder_falsch() {
         let size = 8;
         let map = vec![0.5f32; size * size];
-        // Map tiefer als Referenz -> Vergleich wahr -> beleuchtet.
-        assert_eq!(pcf_box3x3(&map, size, [0.5, 0.5], 0.6), 1.0);
-        assert_eq!(pcf_box3x3(&map, size, [0.5, 0.5], 0.4), 0.0);
-        // Exakt gleich: `<=` zaehlt als beleuchtet (Hardware-Konvention).
+        // Blocker auf 0.5: Referenz dahinter (0.6) -> im Schatten;
+        // Referenz davor (0.4) -> beleuchtet.
+        assert_eq!(pcf_box3x3(&map, size, [0.5, 0.5], 0.6), 0.0);
+        assert_eq!(pcf_box3x3(&map, size, [0.5, 0.5], 0.4), 1.0);
+        // Exakt gleich: `<=` zaehlt als beleuchtet (Hardware-Konvention,
+        // Selbstaequivalenz ohne Bias — der Empfaenger ist sein eigener
+        // naechster Eintrag in der Map).
         assert_eq!(pcf_box3x3(&map, size, [0.5, 0.5], 0.5), 1.0);
     }
 
     #[test]
     fn pcf_weicht_kante_und_klemmt_am_rand() {
         let size = 8;
-        // Stufenkante: linke Haelfte tief (beleuchtet), rechte hoch (Schatten).
+        // Stufenkante: linke Haelfte nahe am Licht (Blocker 0.25 ->
+        // Schatten fuer die Referenz 0.5), rechte fern (0.75 -> beleuchtet).
         let map: Vec<f32> = (0..size * size)
             .map(|i| if i % size < size / 2 { 0.25 } else { 0.75 })
             .collect();
         let reference = 0.5;
-        assert_eq!(pcf_box3x3(&map, size, [0.25, 0.5], reference), 1.0);
-        assert_eq!(pcf_box3x3(&map, size, [0.75, 0.5], reference), 0.0);
+        assert_eq!(pcf_box3x3(&map, size, [0.25, 0.5], reference), 0.0);
+        assert_eq!(pcf_box3x3(&map, size, [0.75, 0.5], reference), 1.0);
         let mid = pcf_box3x3(&map, size, [0.5, 0.5], reference);
         assert!(mid > 0.0 && mid < 1.0, "Kantenmittel {mid}");
         // uv ueber den Rand hinaus: Klemmung statt Panic, Ergebnis gueltig.

@@ -153,7 +153,7 @@ fn fsr1_gpu_kette_matcht_cpu_referenz_und_schlaegt_bilinear() {
             material_id: 173,
         },
     ];
-    be.render_deferred(&cam, &batches_up, hdr, &lights, Some(upscale))
+    be.render_deferred(&cam, &batches_up, hdr, &lights, Some(upscale), None)
         .expect("render_deferred mit Upscale");
     let (iw, ih, internal) = be.read_deferred_internal().expect("read internal");
     assert_eq!((iw, ih), (32, 32), "interner Frame muss display/scale sein");
@@ -200,7 +200,7 @@ fn fsr1_gpu_kette_matcht_cpu_referenz_und_schlaegt_bilinear() {
             material_id: 173,
         },
     ];
-    nat.render_deferred(&cam, &batches_native, hdr, &lights, None)
+    nat.render_deferred(&cam, &batches_native, hdr, &lights, None, None)
         .expect("render_deferred nativ");
     let (nw, nh, native) = nat.read_deferred_rgba().expect("read native");
     assert_eq!((nw, nh), (64, 64));

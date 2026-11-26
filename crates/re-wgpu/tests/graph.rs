@@ -63,7 +63,7 @@ fn executor_folgt_dem_kompilierten_graphen() {
 
     // ── Tor 1: mit Upscale ist der Plan die sechsköpfige Kette — und
     // der Executor hat sie genau so ausgeführt (Spur aus dem Frame).
-    be.render_deferred(&cam, &batches, hdr, &lights, Some(upscale))
+    be.render_deferred(&cam, &batches, hdr, &lights, Some(upscale), None)
         .expect("render_deferred mit Upscale");
     assert_eq!(
         be.deferred_pass_order().expect("Pass-Folge"),
@@ -81,7 +81,7 @@ fn executor_folgt_dem_kompilierten_graphen() {
 
     // ── Tor 2: ohne Upscale endet die Kette beim Tone-Mapping —
     // dieselbe Deklaration, andere Konfiguration, kürzerer Plan.
-    be.render_deferred(&cam, &batches, hdr, &lights, None).expect("render nativ");
+    be.render_deferred(&cam, &batches, hdr, &lights, None, None).expect("render nativ");
     assert_eq!(
         be.deferred_pass_order().expect("Pass-Folge nativ"),
         ["d-cull", "d-geometry", "d-light", "d-tonemap"],
@@ -90,7 +90,7 @@ fn executor_folgt_dem_kompilierten_graphen() {
 
     // ── Tor 3: Determinismus — gleicher Plan, gleiches Bild.
     let (_, _, first) = be.read_deferred_rgba().expect("read nativ 1");
-    be.render_deferred(&cam, &batches, hdr, &lights, None).expect("render nativ 2");
+    be.render_deferred(&cam, &batches, hdr, &lights, None, None).expect("render nativ 2");
     assert_eq!(
         be.deferred_pass_order().expect("Pass-Folge nativ 2"),
         ["d-cull", "d-geometry", "d-light", "d-tonemap"]

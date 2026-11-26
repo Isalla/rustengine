@@ -114,7 +114,14 @@ mit ehrlichem Haken-Stand. ✅ fertig und testabgedeckt · 🟡 teilweise gebaut
       Licht-Listen je Cluster — Index-fuer-Index gegen `cull_lights()`
       auf der CPU verifiziert, ueber alle Cluster (der CPU-Kern bleibt
       die Referenz im Test)
-- [ ] Shadow 2.0 (kaskadiert + geclustert)
+- [x] Shadow 2.0 kaskadiert: der GPU-Tiefen-Pass spiegelt
+      `re-render::shadow` Zug-fuer-Zug — eine Depth-Schicht je Kaskade
+      in einer 2D-Array-Map, Kugel-Fit mit Texel-Snapping (rechnet der
+      CPU-Kern pro Frame), 3x3-PCF durch Hardware-Compare-Sampler;
+      Map-Sonden und jeder Bodenpixel gegen die CPU-Referenz auf der
+      Readback-Map verifiziert
+- [ ] Shadow 2.0 geclustert: schattenwerfende Punktlichter über die
+      Cluster-Listen ([rendering.de](rendering.de.md))
 - [x] Upscaling-Adapter FSR1 (EASU + RCAS) hinter dem Tone-Mapping der
       Deferred-Kette — der Pi-Pfad (M13): intern mit 1/Skala rendern,
       aufs Display hochskalieren. Die WGSL spiegelt `re_render::fsr`

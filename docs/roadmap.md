@@ -111,7 +111,14 @@ honest state of repair. ✅ done and test-covered · 🟡 partially built ·
       per-cluster light lists — verified index-for-index against
       `cull_lights()` on the CPU across every cluster (the CPU core
       remains the test reference)
-- [ ] Shadow 2.0 (cascaded + clustered)
+- [x] Shadow 2.0 cascaded: the GPU depth pass mirrors
+      `re-render::shadow` tap-for-tap — one depth layer per cascade in
+      a 2D-array map, sphere fit with texel snapping (computed by the
+      CPU core per frame), 3x3 PCF through a hardware comparison
+      sampler; map probes and every floor pixel verified against the
+      CPU reference on the readback map
+- [ ] Shadow 2.0 clustered: shadow-casting point lights via the
+      cluster lists ([rendering](rendering.md))
 - [x] Upscaling adapter FSR1 (EASU + RCAS) behind the deferred chain's
       tone map — the Pi-tier path (M13): render internally at 1/scale,
       upscale to display. The WGSL mirrors `re_render::fsr` (port of

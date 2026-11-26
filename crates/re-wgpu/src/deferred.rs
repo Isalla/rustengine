@@ -16,7 +16,8 @@
 
 use re_core::mesh::Mesh;
 use re_render::{
-    AccessKind, Camera, ClusterGrid, CompiledGraph, GfxError, Layout, RenderGraph, ToneCurve,
+    fit_cascade, AccessKind, Camera, CascadeSetup, ClusterGrid, CompiledGraph, GfxError, Layout,
+    RenderGraph, ToneCurve,
 };
 
 const DEFERRED_SHADER: &str = include_str!("../deferred.wgsl");
@@ -187,6 +188,66 @@ pub struct DeferredUpscale {
     pub sharpness_stops: f32,
 }
 
+/// Kaskadierte Schatten (M5, Shadow 2.0): der `d-shadow`-Pass rendert
+/// die Geometrie tiefenbezogen in eine Depth-Array-Map je Kaskade,
+/// der Lighting-Pass vergleicht mit PCF — dieselbe Mathematik wie der
+/// CPU-Kern `re_render::shadow` (Kaskaden-Aufteilung, Sphere-Fit mit
+/// Texel-Snapping, Neigungs-Bias, 3x3-Box).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DeferredShadow {
+    /// Edge-Laenge der Shadow-Map in Texel (je Kaskade, quadratisch).
+    pub map_size: u32,
+    /// Anzahl Kaskaden (1..=4, die Grenze klemmt der CPU-Kern).
+    pub cascades: usize,
+    /// Log↔Uniform-Mischung der Kaskaden-Grenzen, 0..=1.
+    pub lambda: f32,
+    /// Reichweite der Schatten in Welt-Einheiten — die Kamera-Ferngrenze
+    /// (4000) ist dafuer viel zu gross; der Kern klemmt sie an die
+    /// Kamera-Spanne.
+    pub range: f32,
+    /// konstanter Tiefen-Bias (Map-Einheiten 0..1).
+    pub bias_constant: f32,
+    /// Neigungsanteil des Bias — streifende Flaechen brauchen mehr.
+    pub bias_slope: f32,
+}
+
+impl Default for DeferredShadow {
+    fn default() -> Self {
+        Self {
+            map_size: 1024,
+            cascades: 4,
+            lambda: 0.5,
+            range: 60.0,
+            bias_constant: 0.0015,
+            bias_slope: 0.006,
+        }
+    }
+}
+
+/// WGSL-Seite von `struct ShadowUni` — je Kaskade die kombinierte
+/// Light-Space-Matrix aus `fit_cascade`, die Kaskaden-Grenzen gepackt
+/// (wie beim Cluster-Uniform) und Zahl + Bias-Parameter.
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct ShadowUni {
+    light_view_proj: [[[f32; 4]; 4]; 4],
+    bounds: [[f32; 4]; 2],
+    params: [f32; 4],
+}
+
+/// Licht-Matrix mit negierter y-Zeile für den Upload: der Rasterizer
+/// schreibt NDC y = +1 in Textur-Zeile 0, der CPU-Kern (`project_shadow`,
+/// `pcf_box3x3`) indiziert Zeilen mit v = (y + 1) / 2. Die Spiegelung
+/// überführt die GPU-Speicherung in die Kern-Konvention — Readback und
+/// Compare-Sampler lesen dann denselben Texel wie der Kern. Der Shader
+/// kompensiert sie beim UV-Bezug (uv.y = 0.5 − ndc.y · 0.5).
+fn flip_y(mut m: [[f32; 4]; 4]) -> [[f32; 4]; 4] {
+    for col in m.iter_mut() {
+        col[1] = -col[1];
+    }
+    m
+}
+
 /// WGSL-Seite von `struct FsrCon` (EASU-Konstanten + RCAS-Blende,
 /// FsrEasuCon/FsrRcasCon in einem Upload): sk = interne/display Größe,
 /// ofs = 0.5*sk − 0.5 (`ofs`, weil `of` in WGSL reserviert ist),
@@ -280,19 +341,15 @@ impl GBufferReadback {
 // Executor in `Deferred::render` folgt dem kompilierten Ablauf statt
 // einem Code-Zettel. Ein neuer Pass (Shadow 2.0) ist ein Knoten mehr:
 // Ressource registrieren, Zugriffe deklarieren, Match-Arm ergänzen.
-const P_CULL: usize = 0;
-const P_GEOMETRY: usize = 1;
-const P_LIGHT: usize = 2;
-const P_TONE: usize = 3;
-const P_EASU: usize = 4;
-const P_RCAS: usize = 5;
-
 /// Die Deferred-Kette als Graph deklariert — dieselbe Deklaration in
 /// zwei Konfigurationen: mit Upscale hängen EASU und RCAS hinter dem
-/// Tone-Mapping, sonst endet die Kette dort. Der kompilierte Ablauf
-/// entscheidet die Reihenfolge (deterministisch, alphabetischer
-/// Tie-Break — deshalb läuft `d-cull` vor `d-geometry`, obwohl beide
-/// unabhängig sind); der Executor führt nur noch aus.
+/// Tone-Mapping, sonst endet die Kette dort. Der Schatten-Pass ist ein
+/// eigener Knoten: er schreibt die Shadow-Map, die das Lighting liest —
+/// ohne ihn (Konfiguration `None`) fehlt der Knoten im Plan. Der
+/// kompilierte Ablauf entscheidet die Reihenfolge (deterministisch,
+/// alphabetischer Tie-Break — deshalb läuft `d-cull` vor `d-geometry`,
+/// obwohl beide unabhängig sind); der Executor führt nur noch aus und
+/// adressiert die Passes über ihre Namen, nicht über feste Indizes.
 ///
 /// Was der Graph hier wirklich steuert: die Reihenfolge und die
 /// Lese-/Schreib-Rechte je Pass. Die Layout-Übergänge berechnet er
@@ -301,13 +358,14 @@ const P_RCAS: usize = 5;
 /// Backends liegen sie im [`CompiledGraph`] bereit. Speicher-Aliasing
 /// folgt mit einem eigenen Target-Pool: die Lebensspannen (`spans`)
 /// sind berechnet, wgpu allokiert die Targets noch selbst.
-fn build_graph(upscale: bool) -> (RenderGraph, CompiledGraph) {
+fn build_graph(upscale: bool, shadow: bool) -> (RenderGraph, CompiledGraph) {
     let mut g = RenderGraph::new();
     let gb0 = g.add_resource("gb0", Layout::Undefined);
     let gb1 = g.add_resource("gb1", Layout::Undefined);
     let gb2 = g.add_resource("gb2", Layout::Undefined);
     let depth = g.add_resource("depth", Layout::Undefined);
     let lists = g.add_resource("cluster_lights", Layout::Undefined);
+    let shadow_map = g.add_resource("shadow_map", Layout::Undefined);
     let hdr = g.add_resource("hdr", Layout::Undefined);
     let final_img = g.add_resource("final", Layout::Undefined);
     let easu = g.add_resource("easu", Layout::Undefined);
@@ -324,17 +382,27 @@ fn build_graph(upscale: bool) -> (RenderGraph, CompiledGraph) {
             RenderGraph::access(depth, AccessKind::Write),
         ],
     );
-    g.add_pass(
-        "d-light",
-        vec![
-            RenderGraph::access(gb0, AccessKind::Read),
-            RenderGraph::access(gb1, AccessKind::Read),
-            RenderGraph::access(gb2, AccessKind::Read),
-            RenderGraph::access(depth, AccessKind::Read),
-            RenderGraph::access(lists, AccessKind::Read),
-            RenderGraph::access(hdr, AccessKind::Write),
-        ],
-    );
+    if shadow {
+        // Tiefen-Pass der Sonne — schreibt die Map, die `d-light`
+        // vergleicht. Eigene Target-Größe (unabhängig vom Display),
+        // darum hier nur als Fluss-Knoten, nicht als Resize-Target.
+        g.add_pass("d-shadow", vec![RenderGraph::access(shadow_map, AccessKind::Write)]);
+    }
+    let mut light_access = vec![
+        RenderGraph::access(gb0, AccessKind::Read),
+        RenderGraph::access(gb1, AccessKind::Read),
+        RenderGraph::access(gb2, AccessKind::Read),
+        RenderGraph::access(depth, AccessKind::Read),
+        RenderGraph::access(lists, AccessKind::Read),
+        RenderGraph::access(hdr, AccessKind::Write),
+    ];
+    if shadow {
+        // Der Lese-Zugriff nur mit Schatten-Pass: ohne Schreiber waere
+        // es ein uninitialisierter Lesefall im Plan (das Uniform zaehlt
+        // dann Kaskaden = 0, der Shader frueh aus — kein Datenfluss).
+        light_access.push(RenderGraph::access(shadow_map, AccessKind::Read));
+    }
+    g.add_pass("d-light", light_access);
     g.add_pass(
         "d-tonemap",
         vec![
@@ -419,6 +487,32 @@ pub(crate) struct Deferred {
     rcas_view: Option<wgpu::TextureView>,
     fsr_bind: Option<wgpu::BindGroup>,
     rcas_bind: Option<wgpu::BindGroup>,
+    /// Shadow 2.0: Depth-Array-Map (eine Schicht je Kaskade) +
+    /// Compare-Sampler fuer den PCF-Vergleich + Schicht-Views fuer den
+    /// Tiefen-Pass + Licht-Matrix-Uniform je Kaskade (CamUni-Form, der
+    /// Geometrie-Vertexshader bleibt unangetastet) + Shadow-Uniform
+    /// fuer das Lighting + die tiefe-only Pipeline.
+    #[allow(dead_code)] // shadow_tex naehrt shadow_view und shadow_layers
+    shadow_tex: wgpu::Texture,
+    shadow_view: wgpu::TextureView,
+    shadow_layers: Vec<wgpu::TextureView>,
+    shadow_cmp: wgpu::Sampler,
+    shadow_cams: Vec<(wgpu::Buffer, wgpu::BindGroup)>,
+    shadow_uni_buf: wgpu::Buffer,
+    pipe_shadow: wgpu::RenderPipeline,
+    /// Schatten-Einstellung, fuer die diese Zustaende gebaut wurden —
+    /// `None` laesst den `d-shadow`-Knoten aus dem Plan fallen.
+    shadow: Option<DeferredShadow>,
+    /// Pass-Indizes aus der Graph-Deklaration, per Name aufgeloest —
+    /// der Schatten-Knoten existiert nur bei Aktivierung, feste
+    /// Konstanten wuerden bei Abschaltung umnummerieren.
+    idx_cull: usize,
+    idx_geometry: usize,
+    idx_shadow: Option<usize>,
+    idx_light: usize,
+    idx_tone: usize,
+    idx_easu: Option<usize>,
+    idx_rcas: Option<usize>,
     /// Upscale-Einstellung, fuer die diese Zustaende gebaut wurden.
     upscale: Option<DeferredUpscale>,
     /// Render-Graph (Box 5): die Deklaration der Kette und ihr
@@ -435,11 +529,15 @@ pub(crate) struct Deferred {
 }
 
 impl Deferred {
-    pub(crate) fn new(inner: &Inner, upscale: Option<DeferredUpscale>) -> Self {
+    pub(crate) fn new(
+        inner: &Inner,
+        upscale: Option<DeferredUpscale>,
+        shadow: Option<DeferredShadow>,
+    ) -> Self {
         let device = &inner.device;
-        // Der Graph haengt nur an der Upscale-Entscheidung: gleiche
+        // Der Graph haengt an Upscale- und Schatten-Entscheidung: gleiche
         // Deklaration => gleicher kompilierter Ablauf (Box 5).
-        let (graph, compiled) = build_graph(upscale.is_some());
+        let (graph, compiled) = build_graph(upscale.is_some(), shadow.is_some());
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("re-deferred"),
             source: wgpu::ShaderSource::Wgsl(DEFERRED_SHADER.into()),
@@ -544,6 +642,37 @@ impl Deferred {
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                // Shadow 2.0: Depth-Array-Map, Compare-Sampler und
+                // Shadow-Uniform. Die Eintraege existieren immer — ohne
+                // Schatten-Pass zaehlt das Uniform die Kaskaden auf null
+                // und der Shader frueh aus (ein Layout pro Pipeline,
+                // nicht eines pro Konfiguration).
+                wgpu::BindGroupLayoutEntry {
+                    binding: 9,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Depth,
+                        view_dimension: wgpu::TextureViewDimension::D2Array,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 10,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Comparison),
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 11,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
                         has_dynamic_offset: false,
                         min_binding_size: None,
                     },
@@ -829,6 +958,84 @@ impl Deferred {
                 (None, None, None, None, None, None)
             };
 
+        // ── Shadow 2.0 (M5) ────────────────────────────────────────────
+        // Die Map ist display-unabhaengig (eigene feste Kantenlaenge) —
+        // ohne Schatten-Konfiguration genuegt eine Mini-Dummy-Map: das
+        // Lighting-Layout bindet die Eintraege immer, der Shader liest
+        // sie nur, wenn das Uniform Kaskaden zaehlt.
+        let smap = shadow.map(|s| s.map_size.max(16)).unwrap_or(16);
+        let ncasc = shadow.map(|s| s.cascades.clamp(1, 4)).unwrap_or(1);
+        let shadow_tex = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("d-shadow-map"),
+            size: wgpu::Extent3d { width: smap, height: smap, depth_or_array_layers: ncasc as u32 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Depth32Float,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                | wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        // Das View immer als Array ausweisen: eine 1-Schicht-Textur hätte
+        // sonst automatisch D2 — das Lighting-Layout verlangt D2Array.
+        let shadow_view = shadow_tex.create_view(&wgpu::TextureViewDescriptor {
+            dimension: Some(wgpu::TextureViewDimension::D2Array),
+            ..Default::default()
+        });
+        let shadow_layers: Vec<wgpu::TextureView> = (0..ncasc as u32)
+            .map(|i| {
+                shadow_tex.create_view(&wgpu::TextureViewDescriptor {
+                    dimension: Some(wgpu::TextureViewDimension::D2),
+                    base_array_layer: i,
+                    array_layer_count: Some(1),
+                    ..Default::default()
+                })
+            })
+            .collect();
+        // Compare-Sampler: wgpu vergleicht `Referenz COMPARE Texel` —
+        // LessEqual heißt `Referenz <= Texel` und ist damit exakt die
+        // Richtung von compare_bilinear im CPU-Kern (beleuchtet, wer
+        // näher am Licht liegt als der nächste Blocker); Klemmung wie
+        // dessen Rand.
+        let shadow_cmp = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("d-shadow-cmp"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            compare: Some(wgpu::CompareFunction::LessEqual),
+            ..Default::default()
+        });
+        // Je Kaskade ein CamUni-Uniform: der Geometrie-Vertexshader
+        // bleibt, was er ist — der Tiefen-Pass schiebt ihm einfach die
+        // Licht-Matrix als view_proj unter.
+        let shadow_cams: Vec<(wgpu::Buffer, wgpu::BindGroup)> = (0..ncasc)
+            .map(|_| {
+                let buf = device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("d-shadow-cam"),
+                    size: std::mem::size_of::<CamUni>() as u64,
+                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                });
+                let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("d-shadow-cam-bind"),
+                    layout: &g0,
+                    entries: &[wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: buf.as_entire_binding(),
+                    }],
+                });
+                (buf, bind)
+            })
+            .collect();
+        let shadow_uni_buf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("d-shadow-uni"),
+            size: std::mem::size_of::<ShadowUni>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
         let layout_geo = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("d-layout-geo"),
             bind_group_layouts: &[Some(&g0), Some(&g1_geo)],
@@ -892,6 +1099,40 @@ impl Deferred {
                     }),
                 ],
             }),
+            multiview_mask: None,
+            cache: None,
+        });
+
+        // Schatten-Tiefen-Pass: derselbe Geometrie-Vertexshader, keine
+        // Farbziele, nur Depth-Write — die Licht-Matrix kommt als
+        // view_proj aus dem Kaskaden-Uniform (Layout wie der
+        // Geometrie-Pass, beide Bind-Groups passen unveraendert).
+        let pipe_shadow = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("d-shadow"),
+            layout: Some(&layout_geo),
+            vertex: wgpu::VertexState {
+                module: &module,
+                entry_point: Some("vs_geometry"),
+                compilation_options: Default::default(),
+                buffers: &[Some(wgpu::VertexBufferLayout {
+                    array_stride: std::mem::size_of::<Vtx>() as wgpu::BufferAddress,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &crate::VERTEX_ATTRS,
+                })],
+            },
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                ..Default::default()
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: wgpu::TextureFormat::Depth32Float,
+                depth_write_enabled: Some(true),
+                depth_compare: Some(wgpu::CompareFunction::Less),
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
+            multisample: wgpu::MultisampleState::default(),
+            fragment: None,
             multiview_mask: None,
             cache: None,
         });
@@ -1037,6 +1278,18 @@ impl Deferred {
             cache: None,
         });
 
+        // Pass-Indizes aus der Deklaration, per Name aufgeloest — mit
+        // Schatten-Knoten verschieben sich die Indizes der Folge-Passes,
+        // feste Konstanten haetten dafuer umnummerieren muessen.
+        let pass_idx = |name: &str| graph.passes().iter().position(|p| p.name == name);
+        let idx_cull = pass_idx("d-cull").expect("d-cull ist deklariert");
+        let idx_geometry = pass_idx("d-geometry").expect("d-geometry ist deklariert");
+        let idx_shadow = pass_idx("d-shadow");
+        let idx_light = pass_idx("d-light").expect("d-light ist deklariert");
+        let idx_tone = pass_idx("d-tonemap").expect("d-tonemap ist deklariert");
+        let idx_easu = pass_idx("d-easu");
+        let idx_rcas = pass_idx("d-rcas");
+
         Self {
             cam_buf,
             cam_bind,
@@ -1075,6 +1328,21 @@ impl Deferred {
             rcas_view,
             fsr_bind,
             rcas_bind,
+            shadow_tex,
+            shadow_view,
+            shadow_layers,
+            shadow_cmp,
+            shadow_cams,
+            shadow_uni_buf,
+            pipe_shadow,
+            shadow,
+            idx_cull,
+            idx_geometry,
+            idx_shadow,
+            idx_light,
+            idx_tone,
+            idx_easu,
+            idx_rcas,
             upscale,
             graph,
             compiled,
@@ -1130,12 +1398,57 @@ impl Deferred {
             self.resize(inner);
         }
         let post = hdr.to_uni()?;
+        let vp = camera.view_proj();
         let cam = CamUni {
-            view_proj: crate::mat4(camera.view_proj()),
+            view_proj: crate::mat4(vp),
             light_dir_time: [LIGHT_DIR[0], LIGHT_DIR[1], LIGHT_DIR[2], 0.0],
+            inv_view_proj: crate::mat4(vp.inverse()),
         };
         inner.queue.write_buffer(&self.cam_buf, 0, pod_bytes(&cam));
         inner.queue.write_buffer(&self.post_buf, 0, pod_bytes(&post));
+
+        // ── Shadow 2.0: Kaskaden-Aufteilung und Light-Space-Fits laufen ──
+        // pro Frame auf der CPU (dieselben Kern-Aufrufe wie im Test —
+        // `CascadeSetup` + `fit_cascade` mit Texel-Snapping). Der
+        // Schatten-Werfer-Pass bekommt je Kaskade die Licht-Matrix als
+        // view_proj, das Lighting Matrix-Tabelle, Grenzen und Bias.
+        let dr = camera.depth_range();
+        if self.shadow.is_some() && dr.is_none() {
+            return Err(GfxError::Device("kaskadierte Schatten brauchen eine Perspektiv-Kamera".into()));
+        }
+        let mut suni = ShadowUni {
+            light_view_proj: [[[0.0; 4]; 4]; 4],
+            bounds: [[0.0; 4]; 2],
+            params: [0.0; 4],
+        };
+        if let Some(s) = self.shadow {
+            let (near, far_cam) = dr.unwrap_or((0.1, 4000.0));
+            let setup = CascadeSetup::new(s.cascades, near, far_cam.min(s.range), s.lambda);
+            // LIGHT_DIR zeigt zum Licht — der Kern will die Fallrichtung.
+            let fall = -glam::Vec3::new(LIGHT_DIR[0], LIGHT_DIR[1], LIGHT_DIR[2]).normalize();
+            let bounds = setup.boundaries();
+            for (i, &v) in bounds.iter().enumerate().take(5) {
+                suni.bounds[i / 4][i % 4] = v;
+            }
+            for (ci, range) in setup.cascade_ranges().iter().enumerate() {
+                let fit = fit_cascade(*range, &camera.view, &camera.proj, fall, s.map_size, true);
+                // Hochkant gespiegelt hochladen: der Rasterizer schreibt
+                // NDC y = +1 in Zeile 0 der Textur, der CPU-Kern indiziert
+                // Zeilen aber mit v = (y + 1) / 2. Mit negierter y-Zeile
+                // liegt die Map in der Kern-Konvention vor (Zeile 0 = v 0)
+                // — Readback und Compare-Sampler treffen denselben Texel.
+                let lvp = flip_y(crate::mat4(fit.light_view_proj));
+                suni.light_view_proj[ci] = lvp;
+                let scu = CamUni {
+                    view_proj: lvp,
+                    light_dir_time: [0.0; 4],
+                    inv_view_proj: [[0.0; 4]; 4],
+                };
+                inner.queue.write_buffer(&self.shadow_cams[ci].0, 0, pod_bytes(&scu));
+            }
+            suni.params = [setup.count as f32, s.bias_constant, s.bias_slope, 0.0];
+        }
+        inner.queue.write_buffer(&self.shadow_uni_buf, 0, pod_bytes(&suni));
 
         // ── Geclusterte Lichter: Das Culling uebernimmt der GPU-Compute-
         // Pass `cs_cull` (gespiegeltes cluster_view_aabb +
@@ -1143,7 +1456,6 @@ impl Deferred {
         // `cull_lights` bleibt als Referenz im Test — der
         // Listen-Vergleich beweist die Gleichheit Index-fuer-Index. ──────
         let (w, h) = self.size;
-        let dr = camera.depth_range();
         if !lights.is_empty() && dr.is_none() {
             return Err(GfxError::Device("geclusterte Lichter brauchen eine Perspektiv-Kamera".into()));
         }
@@ -1224,6 +1536,9 @@ impl Deferred {
                 wgpu::BindGroupEntry { binding: 6, resource: self.cluster_uni_buf.as_entire_binding() },
                 wgpu::BindGroupEntry { binding: 7, resource: self.cluster_lights_buf.as_entire_binding() },
                 wgpu::BindGroupEntry { binding: 8, resource: self.lights_buf.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 9, resource: wgpu::BindingResource::TextureView(&self.shadow_view) },
+                wgpu::BindGroupEntry { binding: 10, resource: wgpu::BindingResource::Sampler(&self.shadow_cmp) },
+                wgpu::BindGroupEntry { binding: 11, resource: self.shadow_uni_buf.as_entire_binding() },
             ],
         });
 
@@ -1278,8 +1593,7 @@ impl Deferred {
         // unabhaengig, alphabetischer Tie-Break), nicht die Schreibweise.
         let mut order = Vec::with_capacity(self.compiled.order.len());
         for &pi in &self.compiled.order {
-            match pi {
-                P_CULL => {
+            if pi == self.idx_cull {
                     // Licht-Culling auf der GPU — die Listen liest erst
                     // `d-light`; die Ordnung sichert der Graph.
                     let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
@@ -1289,8 +1603,7 @@ impl Deferred {
                     pass.set_pipeline(&self.pipe_cull);
                     pass.set_bind_group(0, &cull_bind, &[]);
                     pass.dispatch_workgroups(cluster_count.div_ceil(64), 1, 1);
-                }
-                P_GEOMETRY => {
+            } else if pi == self.idx_geometry {
                     let c = camera.clear_color;
                     let clear = wgpu::Color {
                         r: c[0] as f64,
@@ -1341,8 +1654,40 @@ impl Deferred {
                         pass.set_index_buffer(p.ibuf.slice(..), wgpu::IndexFormat::Uint32);
                         pass.draw_indexed(0..p.n_indices, 0, 0..1);
                     }
+            } else if Some(pi) == self.idx_shadow {
+                // Schatten-Werfer: Geometrie tiefenbezogen je Kaskade in
+                // ihre Map-Schicht — dieselben Meshes, dieselben Batch-
+                // Bindings, nur die Licht-Matrix als view_proj. Der
+                // Graph sichert, dass `d-light` die Schichten danach liest.
+                let Some(s) = self.shadow else {
+                    unreachable!("Schatten-Knoten im Plan => Schatten-Konfiguration")
+                };
+                for (ci, layer) in
+                    self.shadow_layers.iter().enumerate().take(s.cascades.clamp(1, 4))
+                {
+                    let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
+                        label: Some("d-shadow"),
+                        color_attachments: &[],
+                        depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                            view: layer,
+                            depth_ops: Some(wgpu::Operations {
+                                load: wgpu::LoadOp::Clear(1.0),
+                                store: wgpu::StoreOp::Store,
+                            }),
+                            stencil_ops: None,
+                        }),
+                        ..Default::default()
+                    });
+                    pass.set_pipeline(&self.pipe_shadow);
+                    pass.set_bind_group(0, &self.shadow_cams[ci].1, &[]);
+                    for p in &prep {
+                        pass.set_bind_group(1, &p.bind, &[]);
+                        pass.set_vertex_buffer(0, p.vbuf.slice(..));
+                        pass.set_index_buffer(p.ibuf.slice(..), wgpu::IndexFormat::Uint32);
+                        pass.draw_indexed(0..p.n_indices, 0, 0..1);
+                    }
                 }
-                P_LIGHT => {
+            } else if pi == self.idx_light {
                     let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
                         label: Some("d-light"),
                         color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -1361,8 +1706,7 @@ impl Deferred {
                     pass.set_bind_group(0, &self.cam_bind, &[]);
                     pass.set_bind_group(1, &light_bind, &[]);
                     pass.draw(0..3, 0..1);
-                }
-                P_TONE => {
+            } else if pi == self.idx_tone {
                     let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
                         label: Some("d-tonemap"),
                         color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -1380,12 +1724,11 @@ impl Deferred {
                     pass.set_pipeline(&self.pipe_tonemap);
                     pass.set_bind_group(0, &self.post_bind, &[]);
                     pass.draw(0..3, 0..1);
-                }
-                // FSR1-Kette (nur im Plan, wenn Upscale an ist): EASU
-                // skaliert das interne Ziel aufs Display, RCAS schaerft
-                // nach — der Pi-Pfad (M13). Beide Passes lesen
-                // display-kodierte 8-Bit-Werte, wie AMD es verlangt.
-                P_EASU => {
+                    // FSR1-Kette (nur im Plan, wenn Upscale an ist): EASU
+                    // skaliert das interne Ziel aufs Display, RCAS schaerft
+                    // nach — der Pi-Pfad (M13). Beide Passes lesen
+                    // display-kodierte 8-Bit-Werte, wie AMD es verlangt.
+            } else if Some(pi) == self.idx_easu {
                     let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
                         label: Some("d-easu"),
                         color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -1403,8 +1746,7 @@ impl Deferred {
                     pass.set_pipeline(&self.pipe_fsr);
                     pass.set_bind_group(0, self.fsr_bind.as_ref().expect("Pass im Plan => fsr_bind"), &[]);
                     pass.draw(0..3, 0..1);
-                }
-                P_RCAS => {
+            } else if Some(pi) == self.idx_rcas {
                     let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
                         label: Some("d-rcas"),
                         color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -1422,8 +1764,8 @@ impl Deferred {
                     pass.set_pipeline(&self.pipe_rcas);
                     pass.set_bind_group(0, self.rcas_bind.as_ref().expect("Pass im Plan => rcas_bind"), &[]);
                     pass.draw(0..3, 0..1);
-                }
-                other => unreachable!("Pass {other} ist nicht deklariert"),
+            } else {
+                unreachable!("Pass {pi} ist nicht deklariert");
             }
             order.push(self.graph.passes()[pi].name.clone());
         }
@@ -1497,6 +1839,41 @@ impl Deferred {
             .chunks_exact(4)
             .map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]]))
             .collect())
+    }
+
+    /// Die Shadow-Map einer Kaskade als f32-Tiefen (Zeilen ohne Padding)
+    /// — der Beweis-Kanal des Schatten-Tests: CPU-Seite vergleicht sie
+    /// gegen analytisch projizierte Geometrie und rechnet PCF damit.
+    pub(crate) fn read_shadow_map(
+        &self,
+        inner: &Inner,
+        cascade: usize,
+    ) -> Result<(u32, Vec<f32>), GfxError> {
+        let size = match self.shadow {
+            Some(s) => s.map_size.max(16),
+            None => return Err(GfxError::Device("kein Schatten konfiguriert".into())),
+        };
+        if cascade >= self.shadow_layers.len() {
+            return Err(GfxError::Device(format!(
+                "Kaskade {cascade} ueber die konfigurierten {} hinaus",
+                self.shadow_layers.len()
+            )));
+        }
+        let raw = crate::readback_texture_layer(
+            &inner.device,
+            &inner.queue,
+            &self.shadow_tex,
+            size,
+            size,
+            4,
+            cascade as u32,
+        )?;
+        Ok((
+            size,
+            raw.chunks_exact(4)
+                .map(|c| f32::from_bits(u32::from_le_bytes([c[0], c[1], c[2], c[3]])))
+                .collect(),
+        ))
     }
 
     /// G-Buffer-Targets auslesen (für den Pixel-Diff gegen die
@@ -1577,13 +1954,20 @@ impl Deferred {
     /// neu anlegen. Die neue Größe kommt aus `inner.size`.
     fn resize(&mut self, inner: &mut Inner) {
         let upscale = self.upscale;
-        *self = Self::new(inner, upscale);
+        let shadow = self.shadow;
+        *self = Self::new(inner, upscale, shadow);
     }
 
     /// Die Upscale-Einstellung, fuer die diese Zustaende gebaut wurden —
     /// das Backend vergleicht sie gegen den Wunsch des Aufrufers.
     pub(crate) fn upscale(&self) -> Option<DeferredUpscale> {
         self.upscale
+    }
+
+    /// Die Schatten-Einstellung, fuer die diese Zustaende gebaut wurden
+    /// (dieselbe Vergleichslogik wie bei `upscale`).
+    pub(crate) fn shadow(&self) -> Option<DeferredShadow> {
+        self.shadow
     }
 
     /// Interne Ziel-Groesse (bei Upscale = Display / Skala).

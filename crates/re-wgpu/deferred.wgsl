@@ -5,7 +5,10 @@
 
 struct Camera {
     view_proj : mat4x4<f32>,
-    light_dir_time : vec4<f32>, // xyz = Lichtrichtung, w = Zeit (ungenutzt)
+    light_dir_time : vec4<f32>, // xyz = Lichtrichtung (zum Licht hin), w = Zeit (ungenutzt)
+    // Rueckwaertstransformation fuer die Schatten-Rekonstruktion:
+    // Clip -> Welt. Der Geometrie-Pass benutzt sie nicht.
+    inv_view_proj : mat4x4<f32>,
 };
 @group(0) @binding(0) var<uniform> cam : Camera;
 
@@ -141,6 +144,88 @@ struct LightGpu {
 };
 @group(1) @binding(8) var<storage, read> plights : array<LightGpu>;
 
+// ── Schatten (M5, Shadow 2.0) ─────────────────────────────────────────
+// CSM gegen die Depth-Compare-Map des `d-shadow`-Passes. Die Mathematik
+// ist die Zug-fuer-Zug-Spiegelung von re_render::shadow: Kaskaden-Wahl
+// (cascade_for_depth), Projektion (project_shadow), Neigungs-Bias
+// (depth_bias) und PCF-Box 3x3 (pcf_box3x3). Der Compare-Sampler mit
+// linearem Filter vergleicht je Tap die vier Texel und mischt die
+// Ergebnisse — exakt die Gewichtung des CPU-Kerns. Die Grenzen kommen
+// fertig gerechnet vom CPU-Kern (CascadeSetup::boundaries), die
+// Kaskaden-Matrizen vom Light-Space-Fit (fit_cascade).
+@group(1) @binding(9) var shadow_map : texture_depth_2d_array;
+@group(1) @binding(10) var shadow_cmp : sampler_comparison;
+
+struct ShadowUni {
+    light_view_proj : array<mat4x4<f32>, 4>, // je Kaskade (fit_cascade)
+    bounds : array<vec4<f32>, 2>,            // Grenzen 0..4, gepackt wie beim Cluster
+    params : vec4<f32>, // x = Kaskadenzahl, y = Bias konstant, z = Bias Neigung
+};
+@group(1) @binding(11) var<uniform> sh : ShadowUni;
+
+fn sbnd(i : u32) -> f32 {
+    return sh.bounds[i / 4u][i % 4u];
+}
+
+/// Sichttiefe → Kaskade — gespiegeltes `cascade_for_depth`: Bereich
+/// [grenze[i], grenze[i+1]), Grenze selbst gehoert zur hoheren Kaskade,
+/// auerhalb der Reichweite -1 (kein Schatten).
+fn shadow_cascade(d : f32, n : u32) -> u32 {
+    var c : u32 = 0u;
+    for (var i = 1u; i <= n; i = i + 1u) {
+        if (d >= sbnd(i)) {
+            c = i;
+        }
+    }
+    return c;
+}
+
+/// Schattenfaktor des Welt-Punkts: 0.0 = voll im Schatten, 1.0 = frei.
+/// `view_d` ist die Sichttiefe (laengs Blick−Z, dieselbe Groesse wie bei
+/// den Cluster-Scheiben), `normal` die G-Buffer-Normale.
+fn shadow_visibility(world : vec3<f32>, view_d : f32, normal : vec3<f32>) -> f32 {
+    let n = u32(sh.params.x);
+    if (n == 0u) {
+        return 1.0; // Schatten-Pass deaktiviert
+    }
+    if (view_d < sbnd(0u) || view_d >= sbnd(n)) {
+        return 1.0; // hinter der letzten Grenze — kein Schattenwurf
+    }
+    let c = shadow_cascade(view_d, n);
+    let h = sh.light_view_proj[c] * vec4<f32>(world, 1.0);
+    let ndc = h.xyz / h.w;
+    // Die hochgeladene Matrix ist in y gespiegelt (Speicherung in der
+    // Kern-Konvention: Zeile 0 = v 0) — der UV-Bezug spiegelt zurück:
+    // uv.y = 0.5 − ndc.y · 0.5 trifft genau den Texel, den der Kern liest.
+    let uv = vec2<f32>(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5);
+    if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
+        return 1.0; // außerhalb der Map — wie der CPU-Kern: kein Eintrag
+    }
+    // Neigungs-Bias — gespiegeltes depth_bias mit Fallrichtung −light_dir.
+    // Er verschiebt die Referenz Richtung Licht (Subtraktion), damit sich
+    // flaechennahe Empfaenger nicht selbst schattieren (Acne).
+    let toward = normalize(cam.light_dir_time.xyz);
+    let ndotl = clamp(dot(normal, toward), 0.0, 1.0);
+    let bias = sh.params.y + sh.params.z * (1.0 - ndotl);
+    let reference = ndc.z - bias;
+    // PCF-Box 3x3: neun Taps im Texelabstand, gleichmaessig gemittelt —
+    // der Compare-Sampler (LessEqual: Referenz <= Texel) uebernimmt
+    // die vier Texelvergleiche und die bilineare Mischung je Tap.
+    let t = 1.0 / f32(textureDimensions(shadow_map).x);
+    var sum = 0.0;
+    for (var dy = -1; dy <= 1; dy = dy + 1) {
+        for (var dx = -1; dx <= 1; dx = dx + 1) {
+            let o = vec2<f32>(f32(dx), f32(dy)) * t;
+            // Compare-Sampling mit fester Mip-Stufe 0: coords sind die
+            // UV, die Schicht ist der Index, die Referenz der letzte
+            // Parameter (textureSampleCompareLevel — die Depth-Form des
+            // Hardware-Vergleichs).
+            sum = sum + textureSampleCompareLevel(shadow_map, shadow_cmp, uv + o, i32(c), reference);
+        }
+    }
+    return clamp(sum / 9.0, 0.0, 1.0);
+}
+
 /// Scheibe einer Sichttiefe — gespiegeltes `ClusterGrid::slice_of`:
 /// Grenzen liegen an der *unteren* Scheibe (partition_point), außerhalb
 /// der Spanne kein Cluster (-1).
@@ -240,9 +325,24 @@ fn fs_light(@builtin(position) frag : vec4<f32>) -> @location(0) vec4<f32> {
     // Lambert + konstanter Ambient fuer die gerichtete Sonne, plus die
     // geclusterten Punktlichter. Das Ziel ist ein Float-Target: Werte
     // ueber 1.0 ueberleben bis zum Tone-Mapping — HDR-Beweis der Kette.
+    // Die Sonne ist die einzige geschattete Lichtquelle (Shadow 2.0);
+    // der Ambient bleibt ungeschwaecht — dafuer gibt es noch kein
+    // Ambient-Occlusion, und ein pauschal beschatteter Ambient waere
+    // eine Luege ueber die Qualitaet.
+    let depth = textureLoad(gb_depth, vec2<i32>(coords), 0);
+    var vis = 1.0;
+    if (depth < 1.0) {
+        // Welt-Rekonstruktion aus Clip — dieselbe Kette wie die
+        // Sichttiefe des Cluster-Passes: d = n*f / (f - z*(f - n)).
+        let d = cinfo.near * cinfo.far / (cinfo.far - depth * (cinfo.far - cinfo.near));
+        let ndc_x = 2.0 * (f32(coords.x) + 0.5) / f32(cinfo.width) - 1.0;
+        let ndc_y = 1.0 - 2.0 * (f32(coords.y) + 0.5) / f32(cinfo.height);
+        let world_h = cam.inv_view_proj * vec4<f32>(ndc_x, ndc_y, depth, 1.0);
+        vis = shadow_visibility(world_h.xyz / world_h.w, d, s.normal);
+    }
     let ndl = max(dot(s.normal, normalize(cam.light_dir_time.xyz)), 0.0);
     let sum = cluster_light_sum(coords, s.normal);
-    let c = s.albedo * (vec3<f32>(0.1 + 0.9 * ndl) + sum) * post.light_intensity;
+    let c = s.albedo * (vec3<f32>(0.1 + 0.9 * ndl * vis) + sum) * post.light_intensity;
     return vec4<f32>(c, 1.0);
 }
 

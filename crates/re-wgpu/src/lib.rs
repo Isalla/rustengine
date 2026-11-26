@@ -28,20 +28,28 @@ pub mod deferred;
 
 pub use deferred::{
     CLUSTER_CAP, CLUSTER_SLICES, CLUSTER_TILE, DeferredBatch, DeferredHdr, DeferredLight,
-    DeferredUpscale, GBufferReadback, HdrReadback,
+    DeferredShadow, DeferredUpscale, GBufferReadback, HdrReadback,
 };
 use deferred::Deferred;
 
 const SHADER: &str = include_str!("../shader.wgsl");
 const COPY_ROW_ALIGN: u32 = 256;
 /// Lichtrichtung wie im ISO-Baker (iso.rs), damit Bakes und Echtzeitbild matchen.
-const LIGHT_DIR: [f32; 3] = [0.45, 0.82, 0.35];
+/// Sonnenrichtung des Standard-Szenarios — zeigt zum Licht (y positiv
+/// nach oben). Der Schatten-Kern will die Fallrichtung: negieren.
+/// Tests referenzieren denselben Wert, damit CPU- und GPU-Seite
+/// dieselbe Sonne sehen.
+pub const LIGHT_DIR: [f32; 3] = [0.45, 0.82, 0.35];
 
 #[repr(C)]
 #[derive(Clone, Copy)]
 struct CamUni {
     view_proj: [[f32; 4]; 4],
     light_dir_time: [f32; 4],
+    /// Rueckwaertstransformation fuer die Schatten-Rekonstruktion des
+    /// Deferred-Lightings (Clip → Welt). Der Forward-Shader nutzt sie
+    /// nicht — das Uniform ist geteilt und darf groesser sein.
+    inv_view_proj: [[f32; 4]; 4],
 }
 
 #[repr(C)]
@@ -110,6 +118,20 @@ pub(crate) fn readback_texture(
     h: u32,
     bpp: u32,
 ) -> Result<Vec<u8>, GfxError> {
+    readback_texture_layer(device, queue, tex, w, h, bpp, 0)
+}
+
+/// Wie `readback_texture`, aber von einer Schicht einer Array-Textur
+/// (Shadow-Map je Kaskade) — der Copy-Origin zeigt in die Tiefe.
+pub(crate) fn readback_texture_layer(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    tex: &wgpu::Texture,
+    w: u32,
+    h: u32,
+    bpp: u32,
+    layer: u32,
+) -> Result<Vec<u8>, GfxError> {
     let unpadded = w * bpp;
     let padded = unpadded.div_ceil(COPY_ROW_ALIGN) * COPY_ROW_ALIGN;
     let staging = device.create_buffer(&wgpu::BufferDescriptor {
@@ -125,7 +147,7 @@ pub(crate) fn readback_texture(
         wgpu::TexelCopyTextureInfo {
             texture: tex,
             mip_level: 0,
-            origin: wgpu::Origin3d::ZERO,
+            origin: wgpu::Origin3d { x: 0, y: 0, z: layer },
             aspect: wgpu::TextureAspect::All,
         },
         wgpu::TexelCopyBufferInfo {
@@ -622,13 +644,15 @@ impl WgpuBackend {
 
     // ---------- Deferred (M5) ----------
 
-    /// Ein Deferred-Frame: Geometrie-Pass (MRT-G-Buffer) → Lighting-Pass
-    /// → Tone-Mapping → optional FSR1-Upscale (M5, Box 3: intern mit
-    /// 1/`upscale.scale` rendern, EASU + RCAS aufs Display). Die
-    /// Pass-Reihenfolge kommt aus dem Render-Graphen (M5, Box 5);
-    /// `deferred_pass_order()` liefert den ausgeführten Plan. Das
-    /// Ergebnis liegt im Farb-Ziel — `read_deferred_rgba()` liefert es in
-    /// Display-Groesse. Nur headless sinnvoll (Readback-Proof).
+    /// Ein Deferred-Frame: Geometrie-Pass (MRT-G-Buffer) → optionaler
+    /// Schatten-Werfer (Shadow 2.0) → Lighting-Pass → Tone-Mapping →
+    /// optional FSR1-Upscale (M5, Box 3: intern mit 1/`upscale.scale`
+    /// rendern, EASU + RCAS aufs Display). Die Pass-Reihenfolge kommt
+    /// aus dem Render-Graphen (M5, Box 5); `deferred_pass_order()` liefert
+    /// den ausgeführten Plan — mit `Some(shadow)` steckt der `d-shadow`-
+    /// Knoten darin. Das Ergebnis liegt im Farb-Ziel —
+    /// `read_deferred_rgba()` liefert es in Display-Groesse. Nur headless
+    /// sinnvoll (Readback-Proof).
     pub fn render_deferred(
         &mut self,
         camera: &Camera,
@@ -636,18 +660,20 @@ impl WgpuBackend {
         hdr: DeferredHdr,
         lights: &[DeferredLight],
         upscale: Option<DeferredUpscale>,
+        shadow: Option<DeferredShadow>,
     ) -> Result<(), GfxError> {
         let inner = self
             .inner
             .as_mut()
             .ok_or_else(|| GfxError::Device("init nicht ausgeführt".into()))?;
-        // Neue Upscale-Einstellung => andere Ziel-Groessen => neu bauen.
+        // Neue Upscale- oder Schatten-Einstellung => andere Ziele bzw.
+        // anderer Graph => neu bauen.
         let stale = match &self.deferred {
-            Some(d) => d.upscale() != upscale,
+            Some(d) => d.upscale() != upscale || d.shadow() != shadow,
             None => true,
         };
         if stale {
-            self.deferred = Some(Deferred::new(inner, upscale));
+            self.deferred = Some(Deferred::new(inner, upscale, shadow));
         }
         self.deferred
             .as_mut()
@@ -727,6 +753,21 @@ impl WgpuBackend {
             .ok_or_else(|| GfxError::Device("kein Deferred-Frame gerendert".into()))?;
         let (w, h) = inner.size;
         Ok((w.max(1), h.max(1), d.read_final(inner)?))
+    }
+
+    /// Die Shadow-Map der Kaskade `cascade` als f32-Tiefen (quadratisch,
+    /// Zeilen ohne Padding) — fuer den Beweis gegen die CPU-Referenz.
+    /// Groesse (Kantenlaenge) und Tiefen 0..1; 1.0 = nichts gezeichnet.
+    pub fn read_deferred_shadow_map(&self, cascade: usize) -> Result<(u32, Vec<f32>), GfxError> {
+        let inner = self
+            .inner
+            .as_ref()
+            .ok_or_else(|| GfxError::Device("init nicht ausgeführt".into()))?;
+        let d = self
+            .deferred
+            .as_ref()
+            .ok_or_else(|| GfxError::Device("kein Deferred-Frame gerendert".into()))?;
+        d.read_shadow_map(inner, cascade)
     }
 
     /// Die Pass-Folge des letzten Deferred-Frames — der Beweis, dass
@@ -1097,6 +1138,7 @@ impl GfxBackend for WgpuBackend {
         let cam = CamUni {
             view_proj: mat4(camera.view_proj()),
             light_dir_time: [LIGHT_DIR[0], LIGHT_DIR[1], LIGHT_DIR[2], 0.0],
+            inv_view_proj: mat4(camera.view_proj().inverse()),
         };
         inner.queue.write_buffer(&inner.cam_buf, 0, pod_bytes(&cam));
 

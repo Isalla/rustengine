@@ -50,10 +50,22 @@ unten immer spielbar — auch im Browser.
   und Bind-Nutzung ab), als Daten für spätere explizite Backends.
   Textur-Aliasing folgt mit einem eigenen Target-Pool — die
   Lebensspannen sind berechnet, wgpu allokiert noch selbst. Der
-  Shadow-Pass zieht als Knoten ein, wenn Schatten 2.0 kommt.
-* Schatten 2.0: kaskadiert mit stabilisierten Texeln, gescreente
-  Schatten-Karten-Atlas; vorbereitend für Virtual-Shadow-Map-artige
-  Feinheiten (spätere Stufe, braucht Mesh-Streaming aus M3).
+  Shadow-Pass ist mit Schatten 2.0 als bedingter Knoten eingezogen
+  (nur bei konfigurierter Sonne im Plan; der Executor adressiert
+  Pässe über aufgelöste Namen, nicht über feste Indizes).
+* **Schatten 2.0 — kaskadiert (umgesetzt, M5):** eine Depth-Schicht je
+  Kaskade in einer `Depth32Float`-2D-Array-Textur, Kugel-Fit mit
+  Texel-Snapping, Matrizen pro Frame vom CPU-Kern (`re_render::shadow`
+  — die Zug-fuer-Zug-Referenz). Der Lighting-Pass rekonstruiert
+  Weltpositionen aus der Tiefe und sampelt 3x3-PCF durch einen
+  Hardware-Compare-Sampler (`LessEqual`: Referenz <= Texel — exakt die
+  Richtung von `compare_bilinear` im Kern; die Map liegt über eine
+  gespiegelte Licht-Matrix in der Zeilen-Konvention des Kerns). Das
+  Testtor beweist Map-Tiefen gegen die analytische Projektion und
+  jeden Bodenpixel gegen Kern-PCF auf der Readback-Map.
+  Schatten-Karten-Atlas und Virtual-Shadow-Map-artige Feinheiten
+  bleiben spätere Stufen (braucht Mesh-Streaming aus M3);
+  Punktlichter bleiben bis dahin unbeschattet.
 * **GPU-getriebener Draw-Pfad (nach den Kern-Boxen):** bindless
   Textur-/Material-Arrays (wgpu `TEXTURE_BINDING_ARRAY` + Non-Uniform
   Indexing, wo unterstützt), Compute-Culling (Frustum +

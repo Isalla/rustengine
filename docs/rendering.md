@@ -47,11 +47,23 @@ playable — even in the browser.
   Transitions ship with the plan: implicit on wgpu (the backend derives
   them from attachment and bind use), explicit data for later backends.
   Texture aliasing follows with a dedicated target pool — the
-  lifetimes are computed, wgpu still allocates. The shadow pass joins
-  as a node when Shadows 2.0 lands.
-* Shadows 2.0: cascaded with stabilized texels, screen-space
-  shadow-map atlas; preparing for virtual-shadow-map-style refinements
-  (later stage, needs mesh streaming from M3).
+  lifetimes are computed, wgpu still allocates. The shadow pass joined
+  as a conditional node with Shadows 2.0 (present only when shadows
+  are configured; the executor addresses passes by resolved name, not
+  fixed index).
+* **Shadows 2.0 — cascaded (implemented, M5):** one depth layer per
+  cascade in a `Depth32Float` 2D-array texture, sphere-fitted with
+  texel snapping, matrices computed per frame by the CPU core
+  (`re_render::shadow` — the tap-for-tap reference). The lighting pass
+  reconstructs world positions from depth and samples 3x3 PCF through
+  a hardware comparison sampler (`LessEqual`: reference ≤ texel —
+  exactly the core's `compare_bilinear` direction; the map is stored
+  in the core's row convention via a flipped light matrix). The test
+  gate proves map depths against the analytic projection and every
+  floor pixel against core PCF on the readback map. Screen-space
+  shadow-map atlas and virtual-shadow-map-style refinements remain
+  later stages (they need mesh streaming from M3); point lights stay
+  unshadowed until then.
 * **GPU-driven draw path (after the core boxes):** bindless
   texture/material arrays (wgpu `TEXTURE_BINDING_ARRAY` + non-uniform
   indexing where supported), compute culling (frustum + Hi-Z occlusion
