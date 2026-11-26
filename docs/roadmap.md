@@ -119,9 +119,14 @@ honest state of repair. ✅ done and test-covered · 🟡 partially built ·
       quality gate proves FSR1 beats bilinear against the native frame
 - [ ] Desktop-tier adapters: FSR2/3 (temporal), XeSS, DLSS
       ([rendering](rendering.md))
-- [ ] Render graph: declare the pass chain (shadow → G-buffer → lighting
-      → post) once; the graph schedules it and manages texture
-      transitions/aliasing over the backend traits
+- [x] Render graph: the deferred chain (cull → G-buffer → lighting →
+      post → FSR1) is declared once as data (`re_render::graph`); the
+      `re-wgpu` executor follows the compiled plan — the execution
+      trace proves the order, the pixels stayed identical (every
+      pixel-diff gate still green). Transitions ship with the plan
+      (implicit on wgpu, explicit data for later backends); texture
+      aliasing follows with a target pool — the lifetimes are already
+      computed
 - [ ] GPU-driven draw path (after the core boxes): bindless texture/
       material arrays, compute culling (frustum + Hi-Z occlusion) writing
       indirect draw args, one multi-draw per mesh batch

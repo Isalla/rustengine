@@ -40,11 +40,17 @@ unten immer spielbar — auch im Browser.
   als zweite Quelle für die Desktop-Stufe, zusammen mit dem
   GPU-getriebenen Pfad unten — gleiches Lighting, ~60 MB → ~8 MB
   Geometrie-Traffic bei 1080p unter der Strategie-Kamera.
-* **Render-Graph:** die Pass-Kette (Shadow → G-Buffer → Lighting → Post)
-  wird einmal als Daten deklariert; der Graph plant die Pässe, verwaltet
-  ihre Zwischen-Texturen (Zuteilung und Aliasing) und die
-  Textur-Übergänge über die Backend-Traits — die Backends bleiben dumm,
-  die Pipeline bleibt deklarativ.
+* **Render-Graph (umgesetzt, M5):** die Pass-Kette (Cull → G-Buffer →
+  Lighting → Post → FSR1) wird einmal als Daten in `re_render::graph`
+  deklariert; `re-wgpu` kompiliert sie je Konfiguration, und der
+  Executor folgt dem kompilierten Ablauf — der Code schreibt die
+  Reihenfolge nicht mehr vor (der Sortierer stellt das Licht-Culling
+  vor die Geometrie; beide sind unabhängig). Die Übergänge liegen dem
+  Plan bei: auf wgpu implizit (das Backend leitet sie aus Attachment-
+  und Bind-Nutzung ab), als Daten für spätere explizite Backends.
+  Textur-Aliasing folgt mit einem eigenen Target-Pool — die
+  Lebensspannen sind berechnet, wgpu allokiert noch selbst. Der
+  Shadow-Pass zieht als Knoten ein, wenn Schatten 2.0 kommt.
 * Schatten 2.0: kaskadiert mit stabilisierten Texeln, gescreente
   Schatten-Karten-Atlas; vorbereitend für Virtual-Shadow-Map-artige
   Feinheiten (spätere Stufe, braucht Mesh-Streaming aus M3).

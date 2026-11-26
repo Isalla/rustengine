@@ -1,5 +1,8 @@
-//! Deferred-Pipeline V2 (M5, Box 1 + HDR-Aufsatz + Box 2): MRT-G-Buffer
-//! + Compute-Licht-Culling + Lighting-Pass (HDR-Float) + Tone-Mapping.
+//! Deferred-Pipeline V2 (M5, Box 1 + HDR-Aufsatz + Box 2 + Box 3 +
+//! Box 5): MRT-G-Buffer + Compute-Licht-Culling + Lighting-Pass
+//! (HDR-Float) + Tone-Mapping + FSR1-Upscale. Der Ablauf kommt aus dem
+//! Render-Graphen (`re_render::graph`) — der Executor folgt dem
+//! kompilierten Plan, der Code schreibt die Reihenfolge nicht mehr vor.
 //!
 //! Beweis-Strecke für ADR-0003: der Geometrie-Pass schreibt das Layout
 //! `GBufferLayout::deferred_v1()` (Albedo+Metallic, Oktaeder-Normalen+
@@ -12,7 +15,9 @@
 //! liefert das PNG als Sichtbeleg.
 
 use re_core::mesh::Mesh;
-use re_render::{Camera, ClusterGrid, GfxError, ToneCurve};
+use re_render::{
+    AccessKind, Camera, ClusterGrid, CompiledGraph, GfxError, Layout, RenderGraph, ToneCurve,
+};
 
 const DEFERRED_SHADER: &str = include_str!("../deferred.wgsl");
 
@@ -270,6 +275,95 @@ impl GBufferReadback {
     }
 }
 
+// ── Render-Graph (M5, Box 5): die Pass-Kette als Daten ───────────────
+// Die Indizes verweisen auf die Deklaration in [`build_graph`]; der
+// Executor in `Deferred::render` folgt dem kompilierten Ablauf statt
+// einem Code-Zettel. Ein neuer Pass (Shadow 2.0) ist ein Knoten mehr:
+// Ressource registrieren, Zugriffe deklarieren, Match-Arm ergänzen.
+const P_CULL: usize = 0;
+const P_GEOMETRY: usize = 1;
+const P_LIGHT: usize = 2;
+const P_TONE: usize = 3;
+const P_EASU: usize = 4;
+const P_RCAS: usize = 5;
+
+/// Die Deferred-Kette als Graph deklariert — dieselbe Deklaration in
+/// zwei Konfigurationen: mit Upscale hängen EASU und RCAS hinter dem
+/// Tone-Mapping, sonst endet die Kette dort. Der kompilierte Ablauf
+/// entscheidet die Reihenfolge (deterministisch, alphabetischer
+/// Tie-Break — deshalb läuft `d-cull` vor `d-geometry`, obwohl beide
+/// unabhängig sind); der Executor führt nur noch aus.
+///
+/// Was der Graph hier wirklich steuert: die Reihenfolge und die
+/// Lese-/Schreib-Rechte je Pass. Die Layout-Übergänge berechnet er
+/// mit — auf wgpu sind sie implizit (das Backend stellt sie aus
+/// Attachment- und Bind-Nutzung selbst her), für spätere explizite
+/// Backends liegen sie im [`CompiledGraph`] bereit. Speicher-Aliasing
+/// folgt mit einem eigenen Target-Pool: die Lebensspannen (`spans`)
+/// sind berechnet, wgpu allokiert die Targets noch selbst.
+fn build_graph(upscale: bool) -> (RenderGraph, CompiledGraph) {
+    let mut g = RenderGraph::new();
+    let gb0 = g.add_resource("gb0", Layout::Undefined);
+    let gb1 = g.add_resource("gb1", Layout::Undefined);
+    let gb2 = g.add_resource("gb2", Layout::Undefined);
+    let depth = g.add_resource("depth", Layout::Undefined);
+    let lists = g.add_resource("cluster_lights", Layout::Undefined);
+    let hdr = g.add_resource("hdr", Layout::Undefined);
+    let final_img = g.add_resource("final", Layout::Undefined);
+    let easu = g.add_resource("easu", Layout::Undefined);
+    let rcas = g.add_resource("rcas", Layout::Undefined);
+    // Kamera-, Post- und Licht-Buffer sind Frame-Eingaben der CPU —
+    // kein Pass-zu-Pass-Fluss, sie gehören nicht in den Graphen.
+    g.add_pass("d-cull", vec![RenderGraph::access(lists, AccessKind::Write)]);
+    g.add_pass(
+        "d-geometry",
+        vec![
+            RenderGraph::access(gb0, AccessKind::Write),
+            RenderGraph::access(gb1, AccessKind::Write),
+            RenderGraph::access(gb2, AccessKind::Write),
+            RenderGraph::access(depth, AccessKind::Write),
+        ],
+    );
+    g.add_pass(
+        "d-light",
+        vec![
+            RenderGraph::access(gb0, AccessKind::Read),
+            RenderGraph::access(gb1, AccessKind::Read),
+            RenderGraph::access(gb2, AccessKind::Read),
+            RenderGraph::access(depth, AccessKind::Read),
+            RenderGraph::access(lists, AccessKind::Read),
+            RenderGraph::access(hdr, AccessKind::Write),
+        ],
+    );
+    g.add_pass(
+        "d-tonemap",
+        vec![
+            RenderGraph::access(hdr, AccessKind::Read),
+            RenderGraph::access(final_img, AccessKind::Write),
+        ],
+    );
+    if upscale {
+        g.add_pass(
+            "d-easu",
+            vec![
+                RenderGraph::access(final_img, AccessKind::Read),
+                RenderGraph::access(easu, AccessKind::Write),
+            ],
+        );
+        g.add_pass(
+            "d-rcas",
+            vec![
+                RenderGraph::access(easu, AccessKind::Read),
+                RenderGraph::access(rcas, AccessKind::Write),
+            ],
+        );
+    }
+    // Die Deklaration ist statisch und bewusst fehlerfrei gebaut —
+    // ein Compile-Fehler hier ist ein Programmierfehler, kein Szenario.
+    let compiled = g.compile().expect("Deferred-Deklaration kompiliert fehlerfrei");
+    (g, compiled)
+}
+
 /// Die Deferred-Zustände des Backends: eigene Targets, eigene Pipelines.
 /// Entsteht lazy beim ersten `render_deferred` in der aktuellen Größe.
 pub(crate) struct Deferred {
@@ -327,6 +421,13 @@ pub(crate) struct Deferred {
     rcas_bind: Option<wgpu::BindGroup>,
     /// Upscale-Einstellung, fuer die diese Zustaende gebaut wurden.
     upscale: Option<DeferredUpscale>,
+    /// Render-Graph (Box 5): die Deklaration der Kette und ihr
+    /// kompilierter Ablauf — der Executor in `render` folgt ihm.
+    graph: RenderGraph,
+    compiled: CompiledGraph,
+    /// Die Pass-Namen des zuletzt ausgefuehrten Ablaufs — Beweiskanal
+    /// fuer den Graph-Test: der Executor folgt dem Plan, nicht dem Code.
+    last_order: Vec<String>,
     /// Display-Groesse (RCAS-Ziel); `size` ist die interne Groesse.
     display: (u32, u32),
     /// Interne Ziel-Groesse (bei Upscale = display / scale).
@@ -336,6 +437,9 @@ pub(crate) struct Deferred {
 impl Deferred {
     pub(crate) fn new(inner: &Inner, upscale: Option<DeferredUpscale>) -> Self {
         let device = &inner.device;
+        // Der Graph haengt nur an der Upscale-Entscheidung: gleiche
+        // Deklaration => gleicher kompilierter Ablauf (Box 5).
+        let (graph, compiled) = build_graph(upscale.is_some());
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("re-deferred"),
             source: wgpu::ShaderSource::Wgsl(DEFERRED_SHADER.into()),
@@ -972,6 +1076,9 @@ impl Deferred {
             fsr_bind,
             rcas_bind,
             upscale,
+            graph,
+            compiled,
+            last_order: Vec::new(),
             display: (w.max(1), h.max(1)),
             size: (iw.max(1), ih.max(1)),
         }
@@ -1006,9 +1113,9 @@ impl Deferred {
         })
     }
 
-    /// Ein Frame: Geometrie-Pass (MRT) → Lighting-Pass (→ HDR-Float,
-    /// inkl. geclusterter Punktlichter) → Tone-Mapping (→ `final_tex`)
-    /// → FSR1 bei Upscale (EASU + RCAS → `rcas_tex`).
+    /// Ein Frame: der kompilierte Graph plant die Pässe (Cull,
+    /// Geometrie, Lighting, Tone-Mapping, FSR1 bei Upscale), der
+    /// Executor baut sie in genau dieser Reihenfolge auf dem Encoder.
     /// Ruft vorher `resize` auf, wenn die Display-Größe wechselt.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn render(
@@ -1164,153 +1271,171 @@ impl Deferred {
         let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("d-frame"),
         });
-        {
-            let c = camera.clear_color;
-            let clear = wgpu::Color {
-                r: c[0] as f64,
-                g: c[1] as f64,
-                b: c[2] as f64,
-                a: c[3] as f64,
-            };
-            let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("d-geometry"),
-                color_attachments: &[
-                    Some(wgpu::RenderPassColorAttachment {
-                        view: &self.gb0_view,
-                        depth_slice: None,
-                        resolve_target: None,
-                        ops: wgpu::Operations { load: wgpu::LoadOp::Clear(clear), store: wgpu::StoreOp::Store },
-                    }),
-                    Some(wgpu::RenderPassColorAttachment {
-                        view: &self.gb1_view,
-                        depth_slice: None,
-                        resolve_target: None,
-                        ops: wgpu::Operations { load: wgpu::LoadOp::Clear(clear), store: wgpu::StoreOp::Store },
-                    }),
-                    Some(wgpu::RenderPassColorAttachment {
-                        view: &self.gb2_view,
-                        depth_slice: None,
-                        resolve_target: None,
-                        ops: wgpu::Operations {
-                            load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                            store: wgpu::StoreOp::Store,
-                        },
-                    }),
-                ],
-                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                    view: &self.depth_view,
-                    depth_ops: Some(wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(1.0),
-                        store: wgpu::StoreOp::Store,
-                    }),
-                    stencil_ops: None,
-                }),
-                ..Default::default()
-            });
-            pass.set_pipeline(&self.pipe_geometry);
-            pass.set_bind_group(0, &self.cam_bind, &[]);
-            for p in &prep {
-                pass.set_bind_group(1, &p.bind, &[]);
-                pass.set_vertex_buffer(0, p.vbuf.slice(..));
-                pass.set_index_buffer(p.ibuf.slice(..), wgpu::IndexFormat::Uint32);
-                pass.draw_indexed(0..p.n_indices, 0, 0..1);
+        // Der Graph plant, der Executor baut (Box 5): jeder kompilierte
+        // Pass bekommt seinen Befehl auf dem Encoder — die Reihenfolge
+        // kommt aus dem CompiledGraph, nicht aus dem Code. Dass `d-cull`
+        // vor `d-geometry` laeuft, entscheidet der Sortierer (beide
+        // unabhaengig, alphabetischer Tie-Break), nicht die Schreibweise.
+        let mut order = Vec::with_capacity(self.compiled.order.len());
+        for &pi in &self.compiled.order {
+            match pi {
+                P_CULL => {
+                    // Licht-Culling auf der GPU — die Listen liest erst
+                    // `d-light`; die Ordnung sichert der Graph.
+                    let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                        label: Some("d-cull"),
+                        timestamp_writes: None,
+                    });
+                    pass.set_pipeline(&self.pipe_cull);
+                    pass.set_bind_group(0, &cull_bind, &[]);
+                    pass.dispatch_workgroups(cluster_count.div_ceil(64), 1, 1);
+                }
+                P_GEOMETRY => {
+                    let c = camera.clear_color;
+                    let clear = wgpu::Color {
+                        r: c[0] as f64,
+                        g: c[1] as f64,
+                        b: c[2] as f64,
+                        a: c[3] as f64,
+                    };
+                    let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
+                        label: Some("d-geometry"),
+                        color_attachments: &[
+                            Some(wgpu::RenderPassColorAttachment {
+                                view: &self.gb0_view,
+                                depth_slice: None,
+                                resolve_target: None,
+                                ops: wgpu::Operations { load: wgpu::LoadOp::Clear(clear), store: wgpu::StoreOp::Store },
+                            }),
+                            Some(wgpu::RenderPassColorAttachment {
+                                view: &self.gb1_view,
+                                depth_slice: None,
+                                resolve_target: None,
+                                ops: wgpu::Operations { load: wgpu::LoadOp::Clear(clear), store: wgpu::StoreOp::Store },
+                            }),
+                            Some(wgpu::RenderPassColorAttachment {
+                                view: &self.gb2_view,
+                                depth_slice: None,
+                                resolve_target: None,
+                                ops: wgpu::Operations {
+                                    load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                                    store: wgpu::StoreOp::Store,
+                                },
+                            }),
+                        ],
+                        depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                            view: &self.depth_view,
+                            depth_ops: Some(wgpu::Operations {
+                                load: wgpu::LoadOp::Clear(1.0),
+                                store: wgpu::StoreOp::Store,
+                            }),
+                            stencil_ops: None,
+                        }),
+                        ..Default::default()
+                    });
+                    pass.set_pipeline(&self.pipe_geometry);
+                    pass.set_bind_group(0, &self.cam_bind, &[]);
+                    for p in &prep {
+                        pass.set_bind_group(1, &p.bind, &[]);
+                        pass.set_vertex_buffer(0, p.vbuf.slice(..));
+                        pass.set_index_buffer(p.ibuf.slice(..), wgpu::IndexFormat::Uint32);
+                        pass.draw_indexed(0..p.n_indices, 0, 0..1);
+                    }
+                }
+                P_LIGHT => {
+                    let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
+                        label: Some("d-light"),
+                        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                            view: &self.hdr_view,
+                            depth_slice: None,
+                            resolve_target: None,
+                            ops: wgpu::Operations {
+                                load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                                store: wgpu::StoreOp::Store,
+                            },
+                        })],
+                        depth_stencil_attachment: None,
+                        ..Default::default()
+                    });
+                    pass.set_pipeline(&self.pipe_light);
+                    pass.set_bind_group(0, &self.cam_bind, &[]);
+                    pass.set_bind_group(1, &light_bind, &[]);
+                    pass.draw(0..3, 0..1);
+                }
+                P_TONE => {
+                    let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
+                        label: Some("d-tonemap"),
+                        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                            view: &self.final_view,
+                            depth_slice: None,
+                            resolve_target: None,
+                            ops: wgpu::Operations {
+                                load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                                store: wgpu::StoreOp::Store,
+                            },
+                        })],
+                        depth_stencil_attachment: None,
+                        ..Default::default()
+                    });
+                    pass.set_pipeline(&self.pipe_tonemap);
+                    pass.set_bind_group(0, &self.post_bind, &[]);
+                    pass.draw(0..3, 0..1);
+                }
+                // FSR1-Kette (nur im Plan, wenn Upscale an ist): EASU
+                // skaliert das interne Ziel aufs Display, RCAS schaerft
+                // nach — der Pi-Pfad (M13). Beide Passes lesen
+                // display-kodierte 8-Bit-Werte, wie AMD es verlangt.
+                P_EASU => {
+                    let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
+                        label: Some("d-easu"),
+                        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                            view: self.easu_view.as_ref().expect("Pass im Plan => easu_view"),
+                            depth_slice: None,
+                            resolve_target: None,
+                            ops: wgpu::Operations {
+                                load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                                store: wgpu::StoreOp::Store,
+                            },
+                        })],
+                        depth_stencil_attachment: None,
+                        ..Default::default()
+                    });
+                    pass.set_pipeline(&self.pipe_fsr);
+                    pass.set_bind_group(0, self.fsr_bind.as_ref().expect("Pass im Plan => fsr_bind"), &[]);
+                    pass.draw(0..3, 0..1);
+                }
+                P_RCAS => {
+                    let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
+                        label: Some("d-rcas"),
+                        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                            view: self.rcas_view.as_ref().expect("Pass im Plan => rcas_view"),
+                            depth_slice: None,
+                            resolve_target: None,
+                            ops: wgpu::Operations {
+                                load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                                store: wgpu::StoreOp::Store,
+                            },
+                        })],
+                        depth_stencil_attachment: None,
+                        ..Default::default()
+                    });
+                    pass.set_pipeline(&self.pipe_rcas);
+                    pass.set_bind_group(0, self.rcas_bind.as_ref().expect("Pass im Plan => rcas_bind"), &[]);
+                    pass.draw(0..3, 0..1);
+                }
+                other => unreachable!("Pass {other} ist nicht deklariert"),
             }
+            order.push(self.graph.passes()[pi].name.clone());
         }
-        // Licht-Culling auf der GPU — muss vor dem Lighting-Pass laufen,
-        // der die Listen liest.
-        {
-            let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("d-cull"),
-                timestamp_writes: None,
-            });
-            pass.set_pipeline(&self.pipe_cull);
-            pass.set_bind_group(0, &cull_bind, &[]);
-            pass.dispatch_workgroups(cluster_count.div_ceil(64), 1, 1);
-        }
-        {
-            let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("d-light"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &self.hdr_view,
-                    depth_slice: None,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: None,
-                ..Default::default()
-            });
-            pass.set_pipeline(&self.pipe_light);
-            pass.set_bind_group(0, &self.cam_bind, &[]);
-            pass.set_bind_group(1, &light_bind, &[]);
-            pass.draw(0..3, 0..1);
-        }
-        {
-            let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("d-tonemap"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &self.final_view,
-                    depth_slice: None,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: None,
-                ..Default::default()
-            });
-            pass.set_pipeline(&self.pipe_tonemap);
-            pass.set_bind_group(0, &self.post_bind, &[]);
-            pass.draw(0..3, 0..1);
-        }
-        // FSR1-Kette (nur bei Upscale): EASU skaliert das interne Ziel
-        // aufs Display, RCAS schaerft nach — der Pi-Pfad (M13). Beide
-        // Passes lesen display-kodierte 8-Bit-Werte, wie AMD es verlangt.
-        if self.upscale.is_some() {
-            {
-                let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
-                    label: Some("d-easu"),
-                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                        view: self.easu_view.as_ref().expect("upscale => easu_view"),
-                        depth_slice: None,
-                        resolve_target: None,
-                        ops: wgpu::Operations {
-                            load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                            store: wgpu::StoreOp::Store,
-                        },
-                    })],
-                    depth_stencil_attachment: None,
-                    ..Default::default()
-                });
-                pass.set_pipeline(&self.pipe_fsr);
-                pass.set_bind_group(0, self.fsr_bind.as_ref().expect("upscale => fsr_bind"), &[]);
-                pass.draw(0..3, 0..1);
-            }
-            {
-                let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
-                    label: Some("d-rcas"),
-                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                        view: self.rcas_view.as_ref().expect("upscale => rcas_view"),
-                        depth_slice: None,
-                        resolve_target: None,
-                        ops: wgpu::Operations {
-                            load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                            store: wgpu::StoreOp::Store,
-                        },
-                    })],
-                    depth_stencil_attachment: None,
-                    ..Default::default()
-                });
-                pass.set_pipeline(&self.pipe_rcas);
-                pass.set_bind_group(0, self.rcas_bind.as_ref().expect("upscale => rcas_bind"), &[]);
-                pass.draw(0..3, 0..1);
-            }
-        }
+        self.last_order = order;
         queue.submit([enc.finish()]);
         Ok(())
+    }
+
+    /// Die Pass-Folge des letzten Frames, so wie der Graph sie geplant
+    /// und der Executor ausgefuehrt hat (Beweiskanal fuer Box 5).
+    pub(crate) fn pass_order(&self) -> &[String] {
+        &self.last_order
     }
 
     /// Das beleuchtete Endergebnis als RGBA8-Bytes — bei Upscale der

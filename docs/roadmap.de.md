@@ -123,9 +123,14 @@ mit ehrlichem Haken-Stand. ✅ fertig und testabgedeckt · 🟡 teilweise gebaut
       gegen den nativen Frame
 - [ ] Desktop-Tier-Adapter: FSR2/3 (zeitlich), XeSS, DLSS
       ([rendering.de](rendering.de.md))
-- [ ] Render-Graph: die Pass-Kette (Shadow → G-Buffer → Lighting → Post)
-      einmal deklarieren; der Graph plant sie und verwaltet
-      Textur-Übergänge/Aliasing über die Backend-Traits
+- [x] Render-Graph: die Deferred-Kette (Cull → G-Buffer → Lighting →
+      Post → FSR1) ist einmal als Daten deklariert (`re_render::graph`);
+      der Executor in `re-wgpu` folgt dem kompilierten Plan — die
+      Ausführungs-Spur beweist die Reihenfolge, die Pixel bleiben
+      dieselben (alle Pixel-Diff-Tore weiter grün). Die Übergänge
+      liegen dem Plan bei (auf wgpu implizit, als Daten für spätere
+      explizite Backends); Textur-Aliasing folgt mit einem Target-Pool —
+      die Lebensspannen sind schon berechnet
 - [ ] GPU-getriebener Draw-Pfad (nach den Kern-Boxen): bindless
       Textur-/Material-Arrays, Compute-Culling (Frustum + Hi-Z-Occlusion)
       schreibt Indirect-Draw-Argumente, ein Multi-Draw pro Mesh-Batch

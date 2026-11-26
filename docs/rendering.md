@@ -39,10 +39,16 @@ playable — even in the browser.
   as a second, desktop-tier surface source alongside the GPU-driven
   path below — same lighting, ~60 MB → ~8 MB geometry traffic at 1080p
   under the strategy camera.
-* **Render graph:** the pass chain (shadow → G-buffer → lighting → post)
-  is declared once as data; the graph schedules the passes, allocates and
-  aliases their intermediate textures and manages transitions over the
-  backend traits — backends stay dumb, the pipeline stays declarative.
+* **Render graph (implemented, M5):** the pass chain (cull → G-buffer →
+  lighting → post → FSR1) is declared once as data in `re_render::graph`;
+  `re-wgpu` compiles it per configuration and its executor follows the
+  compiled order — the code no longer hardcodes the chain (the sorter
+  runs light culling before geometry; both are independent).
+  Transitions ship with the plan: implicit on wgpu (the backend derives
+  them from attachment and bind use), explicit data for later backends.
+  Texture aliasing follows with a dedicated target pool — the
+  lifetimes are computed, wgpu still allocates. The shadow pass joins
+  as a node when Shadows 2.0 lands.
 * Shadows 2.0: cascaded with stabilized texels, screen-space
   shadow-map atlas; preparing for virtual-shadow-map-style refinements
   (later stage, needs mesh streaming from M3).

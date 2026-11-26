@@ -624,8 +624,10 @@ impl WgpuBackend {
 
     /// Ein Deferred-Frame: Geometrie-Pass (MRT-G-Buffer) → Lighting-Pass
     /// → Tone-Mapping → optional FSR1-Upscale (M5, Box 3: intern mit
-    /// 1/`upscale.scale` rendern, EASU + RCAS aufs Display). Das Ergebnis
-    /// liegt im Farb-Ziel — `read_deferred_rgba()` liefert es in
+    /// 1/`upscale.scale` rendern, EASU + RCAS aufs Display). Die
+    /// Pass-Reihenfolge kommt aus dem Render-Graphen (M5, Box 5);
+    /// `deferred_pass_order()` liefert den ausgeführten Plan. Das
+    /// Ergebnis liegt im Farb-Ziel — `read_deferred_rgba()` liefert es in
     /// Display-Groesse. Nur headless sinnvoll (Readback-Proof).
     pub fn render_deferred(
         &mut self,
@@ -725,6 +727,17 @@ impl WgpuBackend {
             .ok_or_else(|| GfxError::Device("kein Deferred-Frame gerendert".into()))?;
         let (w, h) = inner.size;
         Ok((w.max(1), h.max(1), d.read_final(inner)?))
+    }
+
+    /// Die Pass-Folge des letzten Deferred-Frames — der Beweis, dass
+    /// der Executor dem kompilierten Render-Graphen folgt (M5, Box 5).
+    /// Vor dem ersten Deferred-Frame kommt der Plan ohne Ausführung.
+    pub fn deferred_pass_order(&self) -> Result<Vec<String>, GfxError> {
+        let d = self
+            .deferred
+            .as_ref()
+            .ok_or_else(|| GfxError::Device("kein Deferred-Frame gerendert".into()))?;
+        Ok(d.pass_order().to_vec())
     }
 
     /// Das tone-gemappte interne Ziel in interner Groesse — bei Upscale
