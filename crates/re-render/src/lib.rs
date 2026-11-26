@@ -48,6 +48,7 @@ pub mod hdr;
 pub mod jitter;
 pub mod shadow;
 pub mod temporal;
+pub mod ui;
 
 pub use backend::{DrawBatch, GfxBackend, GfxError, NullBackend, Sprite};
 pub use billboard::{billboard_matrix, unit_quad, uv_rect};
@@ -75,3 +76,7 @@ pub use shadow::{
     CascadeSetup,
 };
 pub use temporal::{History, RgbBox, Taa};
+pub use ui::{
+    dock_layout, rasterize, DrawCmd, DrawList, DockNode, FontAtlas, Glyph, PanelPlacement, Rect,
+    Theme, ThemeColors, ThemeMetrics, UiError, UiVertex, ASCII_CHARS,
+};

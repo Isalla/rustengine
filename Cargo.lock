@@ -1596,8 +1596,12 @@ dependencies = [
 name = "re-render"
 version = "0.1.0"
 dependencies = [
+ "ab_glyph",
  "glam",
+ "image",
  "re-core",
+ "serde",
+ "serde_json",
  "thiserror 2.0.21",
  "tracing",
 ]

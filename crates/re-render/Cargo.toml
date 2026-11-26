@@ -7,6 +7,12 @@ license.workspace = true
 [dependencies]
 re-core.workspace = true
 glam.workspace = true
+serde.workspace = true
+ab_glyph.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+image = { version = "0.25", default-features = false, features = ["png"] }
 # wgpu kommt in M1, solange bleibt der Crate leicht kompilierbar.
