@@ -102,6 +102,19 @@ playable — even in the browser.
   * No upscaler is required: native 1:1 rendering stays a mode.
 * Motion-vector and depth formats kept compatible with FSR2/3 from the
   start (reverse-Z convention documented).
+* **Texture compression is an offline decision (asset bake, M13):**
+  GPUs never read raw RGBA — they read block-compressed formats, and
+  which block family a GPU decodes in hardware is platform law:
+  desktop ships **BC7/BC3** (the DXT/S3TC line), mobile and Raspberry
+  Pi (V3D) ship **ETC2** in hardware — DXT is *not* a Pi feature, it is
+  the desktop family — modern mobile also **ASTC** (not in v3d). One
+  source asset, one baked variant per device profile; **Basis
+  Universal** as the optional single-source route (one file, transcode
+  to the target format at load). Compressed textures stay compressed
+  in RAM/VRAM and decode free on read — on a bandwidth-starved GPU
+  like the Pi's this is a frame-rate feature, not just a memory one.
+  The M13 profile checker flags uncompressed or wrongly-targeted
+  textures by name; the Pi-tier upscaler pairing is FSR1 (see above).
 
 ## 3. Dynamic GI and reflections (M6) — "Lumen-like"
 

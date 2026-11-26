@@ -240,16 +240,23 @@ propose + one-click apply, because every step is a registry tool
 - [ ] Device profiles as data: capability manifests (RAM cap, GPU tier,
       target fps, feature flags) — Pi 3/4/5 (V3D), WebGPU, mobile,
       desktop. The same profiles drive the CI render harness, so
-      "Pi-tier" is a measurable claim, not a feeling
+      "Pi-tier" is a measurable claim, not a feeling. Render fields per
+      profile: internal render scale + upscaler choice (Pi tier = FSR1
+      spatial, desktop = FSR2/3/DLSS) + texture target format (Pi =
+      ETC2, desktop = BC7, Web = Basis transcode) — see
+      [rendering.md](rendering.md) "Texture compression is an offline
+      decision"
 - [ ] Profile checker: a pass over the project that *reports* what
       breaks the target — textures over the RAM cap, mandatory deferred
       features, particle budgets, entity density, draw-call counts —
       with numbers and the named fix tool per finding
 - [ ] Downgrade tool chain (registry tools, each reversible and
-      logged): texture mip capping, retargeted asset variants,
-      high-poly → LOD/optimize, real-time light → baked, 3D prop →
-      sprite-bake via the iso baker (`re-core::iso`), forward fallback
-      path instead of deferred (ADR-0003 tiering)
+      logged): texture mip capping, retargeted asset variants, texture
+      bake to the profile's block format (ETC2 for Pi/mobile, BC7 for
+      desktop, Basis as single-source route), high-poly → LOD/optimize,
+      real-time light → baked, 3D prop → sprite-bake via the iso baker
+      (`re-core::iso`), forward fallback path instead of deferred
+      (ADR-0003 tiering)
 - [ ] Proof loop: run the game against a profile in the headless
       harness — frame time, memory, bandwidth measured per tier; the
       roadmap box flips only when a real project passes on real Pi

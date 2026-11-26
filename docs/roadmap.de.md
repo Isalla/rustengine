@@ -250,17 +250,24 @@ Adressierbarkeit, M11), das Mensch und Agent gleich aufrufen.*
 - [ ] Geräte-Profile als Daten: Fähigkeits-Manifeste (RAM-Kappe,
       GPU-Tier, Ziel-fps, Feature-Flags) — Pi 3/4/5 (V3D), WebGPU,
       Mobile, Desktop. Dieselben Profile treiben das CI-Render-Harness,
-      damit „Pi-Tier" eine messbare Aussage ist, kein Gefühl
+      damit „Pi-Tier" eine messbare Aussage ist, kein Gefühl.
+      Render-Felder pro Profil: interne Render-Skala + Upscaler-Wahl
+      (Pi-Tier = FSR1 räumlich, Desktop = FSR2/3/DLSS) +
+      Textur-Zielformat (Pi = ETC2, Desktop = BC7, Web =
+      Basis-Transcode) — siehe
+      [rendering.de.md](rendering.de.md) „Texturkompression ist eine
+      Offline-Entscheidung"
 - [ ] Profil-Prüfer: ein Gang über das Projekt, der *meldet*, was das
       Ziel bricht — Texturen über der RAM-Kappe, Pflicht-Deferred,
       Partikel-Budgets, Entity-Dichte, Draw-Call-Zahl — mit Zahlen und
       dem jeweils genannten Fix-Werkzeug je Befund
 - [ ] Downgrade-Werkzeugkette (Registry-Tools, jeder Schritt rückholbar
       und protokolliert): Mip-Kappung bei Texturen, neu geretargete
-      Asset-Varianten, High-Poly → LOD/Optimieren, Echtzeitlicht →
-      backen, 3D-Requisite → Sprite-Backen über den Iso-Baker
-      (`re-core::iso`), Vorwärts-Fallback statt Deferred (ADR-0003-
-      Tiering)
+      Asset-Varianten, Textur-Back ins Block-Format des Profils (ETC2
+      für Pi/Mobile, BC7 für Desktop, Basis als Einziquellen-Weg),
+      High-Poly → LOD/Optimieren, Echtzeitlicht → backen, 3D-Requisite
+      → Sprite-Backen über den Iso-Baker (`re-core::iso`),
+      Vorwärts-Fallback statt Deferred (ADR-0003-Tiering)
 - [ ] Beweis-Schleife: das Spiel gegen ein Profil im Headless-Harness
       laufen lassen — Frame-Zeit, Speicher, Bandbreite pro Tier
       gemessen; der Roadmap-Kasten erst sichert sich, wenn ein echtes

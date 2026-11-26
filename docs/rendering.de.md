@@ -108,6 +108,21 @@ unten immer spielbar — auch im Browser.
   * Kein Upscaler ist Pflicht: natives 1:1-Rendern bleibt Modus.
 * Motion-Vektor- und Tiefenformate von Anfang an kompatibel zu FSR2/3
   gehalten (Reverse-Z-Konvention dokumentiert).
+* **Texturkompression ist eine Offline-Entscheidung (Asset-Back,
+  M13):** GPUs lesen nie rohes RGBA — sie lesen blockkomprimierte
+  Formate, und welche Block-Familie eine GPU in Hardware dekodiert, ist
+  Plattformgesetz: Desktop liefert **BC7/BC3** (die DXT/S3TC-Linie),
+  Mobile und Raspberry Pi (V3D) liefern **ETC2** in Hardware — DXT ist
+  *kein* Pi-Merkmal, es ist die Desktop-Familie — modernes Mobile
+  zusätzlich **ASTC** (in v3d nicht). Ein Quell-Asset, eine
+  zurückgebackene Variante pro Geräte-Profil; **Basis Universal** als
+  optionaler Einziquellen-Weg (eine Datei, beim Laden ins Zielformat
+  transcodiert). Komprimierte Texturen bleiben in RAM/VRAM komprimiert
+  und dekodieren beim Auslesen kostenlos — auf einer bandbreiten-hungrigen
+  GPU wie der Pi-GPU ist das ein Bildraten-Merkmal, nicht nur ein
+  Speicher-Merkmal. Der M13-Profil-Prüfer meldet unkomprimierte oder
+  falsch geretargete Texturen namentlich; die Upscaler-Parung des
+  Pi-Tiers ist FSR1 (siehe oben).
 
 ## 3. Dynamische GI und Reflexionen (M6) — „Lumen-artig"
 
