@@ -94,7 +94,11 @@ honest state of repair. ✅ done and test-covered · 🟡 partially built ·
 
 ## M5 — Render pipeline V2 ⬜
 
-- [ ] Deferred HDR pipeline
+- [x] Deferred pipeline: MRT G-buffer (`deferred_v1`) + lighting pass over
+      the abstract `surface_at` interface — GPU output pixel-diff verified
+      against the CPU reference (ADR-0003, `re-wgpu/tests/deferred.rs`)
+- [ ] HDR lighting on top: float render targets, clustered lights,
+      tone mapping
 - [ ] Shadow 2.0 (cascaded + clustered)
 - [ ] Upscaling adapters: FSR / XeSS / DLSS ([rendering](rendering.md))
 - [ ] Render graph: declare the pass chain (shadow → G-buffer → lighting

@@ -97,7 +97,11 @@ mit ehrlichem Haken-Stand. ✅ fertig und testabgedeckt · 🟡 teilweise gebaut
 
 ## M5 — Render-Pipeline V2 ⬜
 
-- [ ] Deferred-HDR-Pipeline
+- [x] Deferred-Pipeline: MRT-G-Buffer (`deferred_v1`) + Lighting-Pass über
+      die abstrakte `surface_at`-Schnittstelle — GPU-Ausgabe per Pixel-Diff
+      gegen die CPU-Referenz verifiziert (ADR-0003, `re-wgpu/tests/deferred.rs`)
+- [ ] HDR-Beleuchtung darauf: Float-Render-Ziele, geclusterte Lichter,
+      Tone Mapping
 - [ ] Shadow 2.0 (kaskadiert + geclustert)
 - [ ] Upscaling-Adapter: FSR / XeSS / DLSS ([rendering.de](rendering.de.md))
 - [ ] Render-Graph: die Pass-Kette (Shadow → G-Buffer → Lighting → Post)

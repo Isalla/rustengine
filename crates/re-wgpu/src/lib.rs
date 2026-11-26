@@ -24,6 +24,11 @@ use std::task::{Context, Poll, Wake, Waker};
 use re_core::mesh::Mesh;
 use re_render::{Camera, DrawBatch, GfxBackend, GfxError};
 
+pub mod deferred;
+
+pub use deferred::{DeferredBatch, GBufferReadback};
+use deferred::Deferred;
+
 const SHADER: &str = include_str!("../shader.wgsl");
 const COPY_ROW_ALIGN: u32 = 256;
 /// Lichtrichtung wie im ISO-Baker (iso.rs), damit Bakes und Echtzeitbild matchen.
@@ -90,6 +95,68 @@ const VERTEX_ATTRS: [wgpu::VertexAttribute; 3] = [
 
 fn mat4(m: glam::Mat4) -> [[f32; 4]; 4] {
     m.to_cols_array_2d()
+}
+
+/// Textur → RGBA-Rohbytes per Copy-Buffer (Zeilen ohne 256er-Padding).
+/// `bpp` = Bytes/Pixel des Formats (RGBA8 und RG16F liefern je 4).
+pub(crate) fn readback_texture(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    tex: &wgpu::Texture,
+    w: u32,
+    h: u32,
+    bpp: u32,
+) -> Result<Vec<u8>, GfxError> {
+    let unpadded = w * bpp;
+    let padded = unpadded.div_ceil(COPY_ROW_ALIGN) * COPY_ROW_ALIGN;
+    let staging = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("readback-tex"),
+        size: u64::from(padded) * u64::from(h),
+        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        mapped_at_creation: false,
+    });
+    let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some("readback-tex-enc"),
+    });
+    enc.copy_texture_to_buffer(
+        wgpu::TexelCopyTextureInfo {
+            texture: tex,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All,
+        },
+        wgpu::TexelCopyBufferInfo {
+            buffer: &staging,
+            layout: wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(padded),
+                rows_per_image: Some(h),
+            },
+        },
+        wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+    );
+    queue.submit([enc.finish()]);
+    let slice = staging.slice(..);
+    let (tx, rx) = std::sync::mpsc::channel();
+    slice.map_async(wgpu::MapMode::Read, move |r| {
+        let _ = tx.send(r);
+    });
+    device
+        .poll(wgpu::PollType::wait_indefinitely())
+        .map_err(|e| GfxError::Device(format!("poll: {e}")))?;
+    rx.recv()
+        .map_err(|_| GfxError::Device("map-Kanal abgerissen".into()))?
+        .map_err(|e| GfxError::Device(format!("map: {e}")))?;
+    let view = slice
+        .get_mapped_range()
+        .map_err(|e| GfxError::Device(format!("mapped range: {e}")))?;
+    let mut out = Vec::with_capacity((w * h * bpp) as usize);
+    for row in view.chunks_exact(padded as usize) {
+        out.extend_from_slice(&row[..unpadded as usize]);
+    }
+    drop(view);
+    staging.unmap();
+    Ok(out)
 }
 
 /// wgpu v30 liefert `impl Future` für Adapter/Device-Request. Ohne
@@ -195,6 +262,8 @@ struct Prepared {
 pub struct WgpuBackend {
     inner: Option<Inner>,
     frames: u64,
+    /// Deferred-Zustand (M5): lazy in der aktuellen Zielgröße erzeugt.
+    deferred: Option<Deferred>,
     /// Vor `init` gesetztes Fenster-Ziel (Feature `window`).
     #[cfg(feature = "window")]
     window_src: Option<std::sync::Arc<winit::window::Window>>,
@@ -507,6 +576,68 @@ impl WgpuBackend {
         staging.unmap();
         Ok((w, h, out))
     }
+
+    // ---------- Deferred (M5) ----------
+
+    /// Ein Deferred-Frame: Geometrie-Pass (MRT-G-Buffer) → Lighting-Pass.
+    /// Das Ergebnis liegt im Farb-Ziel — `readback_rgba()` liefert es wie
+    /// im Forward-Pfad. Nur headless sinnvoll (Readback-Proof).
+    pub fn render_deferred(
+        &mut self,
+        camera: &Camera,
+        batches: &[DeferredBatch],
+    ) -> Result<(), GfxError> {
+        let inner = self
+            .inner
+            .as_mut()
+            .ok_or_else(|| GfxError::Device("init nicht ausgeführt".into()))?;
+        if self.deferred.is_none() {
+            self.deferred = Some(Deferred::new(inner));
+        }
+        self.deferred
+            .as_mut()
+            .expect("gerade erzeugt")
+            .render(inner, camera, batches)?;
+        self.frames += 1;
+        Ok(())
+    }
+
+    /// Roh-Inhalt der G-Buffer-Targets des letzten Deferred-Frames.
+    pub fn read_gbuffer(&self) -> Result<GBufferReadback, GfxError> {
+        let inner = self
+            .inner
+            .as_ref()
+            .ok_or_else(|| GfxError::Device("init nicht ausgeführt".into()))?;
+        let d = self
+            .deferred
+            .as_ref()
+            .ok_or_else(|| GfxError::Device("kein Deferred-Frame gerendert".into()))?;
+        d.read_gbuffer(inner)
+    }
+
+    /// Das beleuchtete Deferred-Ergebnis als RGBA8 (Zeilen ohne
+    /// Copy-Padding) — Seitenarm zu `readback_rgba()` für den
+    /// Forward-Pfad. Größe kommt aus den Deferred-Targets.
+    pub fn read_deferred_rgba(&self) -> Result<(u32, u32, Vec<u8>), GfxError> {
+        let inner = self
+            .inner
+            .as_ref()
+            .ok_or_else(|| GfxError::Device("init nicht ausgeführt".into()))?;
+        let d = self
+            .deferred
+            .as_ref()
+            .ok_or_else(|| GfxError::Device("kein Deferred-Frame gerendert".into()))?;
+        let (w, h) = inner.size;
+        Ok((w.max(1), h.max(1), d.read_final(inner)?))
+    }
+
+    /// Sichtbeleg: das beleuchtete Deferred-Ergebnis als PNG.
+    pub fn export_deferred_png(&self, path: &str) -> Result<(), GfxError> {
+        let (w, h, rgba) = self.read_deferred_rgba()?;
+        image::save_buffer(path, &rgba, w, h, image::ColorType::Rgba8)
+            .map_err(|e| GfxError::Device(format!("PNG: {e}")))?;
+        Ok(())
+    }
 }
 
 impl Inner {
@@ -745,6 +876,9 @@ impl GfxBackend for WgpuBackend {
     fn resize(&mut self, width: u32, height: u32) {
         if let Some(inner) = self.inner.as_mut() {
             inner.resize(width, height);
+            // Deferred-Targets passen nicht mehr — beim naechsten
+            // render_deferred in neuer Groesse neu anlegen.
+            self.deferred = None;
         }
     }
 
