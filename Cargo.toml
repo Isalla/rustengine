@@ -16,7 +16,9 @@ members = [
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
-repository = "https://github.com/Isalla/rustengine"
+# Kein `repository` hier: kein Crate erbt das Feld (Cargo warnt vor
+# ungenutzten workspace.package-Feldern). Bei einem echten Publish
+# setzen wir es pro Crate oder lassen es dann alle erben.
 
 [workspace.dependencies]
 re-core = { path = "crates/re-core" }

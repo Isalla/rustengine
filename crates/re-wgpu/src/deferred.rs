@@ -7,7 +7,8 @@
 //! als erster Beleg). Die CPU-Referenz `pack()/unpack()` aus
 //! `re-render::gbuffer` ist dieselbe Mathematik — der Pixel-Diff-Test
 //! (`tests/deferred.rs`) vergleicht GPU-Ausgabe gegen sie, und
-//! [`WgpuBackend::export_deferred_png`] liefert das PNG als Sichtbeleg.
+//! [`WgpuBackend::export_deferred_png`](crate::WgpuBackend::export_deferred_png)
+//! liefert das PNG als Sichtbeleg.
 
 use re_core::mesh::Mesh;
 use re_render::{Camera, GfxError};
