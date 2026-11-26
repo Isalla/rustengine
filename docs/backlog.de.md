@@ -41,3 +41,34 @@ Wang-Kacheln, Mesh-Bridging/-Stitching, parametrische Assets
 Mesh-Komponenten.
 
 **Status:** geparkt — Bau erst, wenn das Grundgerüst des Editors steht.
+
+## B-2: Blackwell-Techdemo (Neural-Tier, Vendor-Sidecar)
+
+**Wunsch (Benutzer, 26.11.2026):** Wenn die Engine fertig ist, eine
+Techdemo aufsetzen, die die RTX-5000-Architektur (Blackwell) anspricht
+— deren neue Niedrigpräzisions-Tensor-Formate (FP4/MX mit
+Block-Skalierung, FP8; zur Einordnung: BF16 ist Ampere-Alter, int8
+älter) — um zu testen, was die Engine im High-End kann und welche
+wirklich coolen Gaming-Features diese Einheiten ermoeglichen.
+
+**Ehrliche Grenze:** wgpu expose keine Tensor-Cores / FP4 /
+Cooperative-Matrix-Extensionen. Die gibt es nur ueber rohes Vulkan
+(`VK_NV_cooperative_vector`, `VK_KHR_cooperative_matrix`) oder D3D12 —
+die Demo muss also ein **Vendor-Sidecar** sein (natives Modul oder
+Inference-Runtime, das Texturen/Ergebnisse zurueck in die Pipeline
+einspeist), niemals eine Voraussetzung. Die Geraete-Profile (M13)
+bekommen ein optionales *Neural-Tier*; die portable Pipeline und der
+Pi bleiben davon unberuehrt.
+
+**Demo-Kandidaten (nach MMO-Nutzen sortiert):**
+
+1. Neuronale Texturkompression — Dekodierung per FP4-Inferenz;
+   mehrfach mehr Welt pro VRAM-Byte (passt zur
+   Kompressions-Doktrin in rendering.md).
+2. Radiance Caches — GI per Training backen, nahezu gratis abtasten.
+3. Selbstgebauteres ML-Upscaling / Frame-Generation als
+   Lernprojekt rund um DLSS-artige Pipelines.
+4. Lokale NPC-Inferenz — kleine Modelle in FP4 direkt auf der Karte.
+
+**Status:** geparkt — wenn der Engine-Kern funktionsvollstaendig ist
+und eine Blackwell-Karte real auf dem Pruefstand liegt.
