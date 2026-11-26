@@ -1,12 +1,12 @@
 //! Beweis für ADR-0003 Box 1 + HDR-Aufsatz + geclusterte Lichter: der
 //! GPU-G-Buffer (MRT, WGSL) liefert dieselben Pixel wie die CPU-
-//! Referenz `GBufferLayout::pack()`; der Lighting-Pass schreibt ein
-//! HDR-Float-Ziel, das Werte ueber 1.0 erhaelt (CPU-Vergleich in
-//! Float-Praezision); die Cluster-Suche des Shaders waehlt dieselben
-//! Licht-Listen wie `cull_lights` auf der CPU; der Tone-Mapping-Pass
-//! endet bei denselben Display-Farben wie `HdrPipeline::process()`.
-//! Laedt den Software-Adapter (llvmpipe) — laeuft headless auf dem
-//! Pi und in der CI.
+//! Referenz `GBufferLayout::pack()`; der Compute-Cull spiegelt
+//! `cull_lights()` Index für Index (Listen-Vergleich über alle
+//! Cluster); der Lighting-Pass schreibt ein HDR-Float-Ziel, das Werte
+//! über 1.0 erhält (CPU-Vergleich in Float-Präzision); der
+//! Tone-Mapping-Pass endet bei denselben Display-Farben wie
+//! `HdrPipeline::process()`. Läuft headless auf dem Pi und in der CI
+//! (Software-Adapter llvmpipe).
 
 use re_core::mesh::Mesh;
 use re_render::{
@@ -14,7 +14,8 @@ use re_render::{
     Surface, ToneCurve,
 };
 use re_wgpu::{
-    DeferredBatch, DeferredHdr, DeferredLight, WgpuBackend, CLUSTER_SLICES, CLUSTER_TILE,
+    DeferredBatch, DeferredHdr, DeferredLight, WgpuBackend, CLUSTER_CAP, CLUSTER_SLICES,
+    CLUSTER_TILE,
 };
 
 fn quad(normal: [f32; 3], half: f32) -> Mesh {
@@ -175,6 +176,21 @@ fn gpu_gbuffer_und_lighting_matchen_cpu_referenz() {
     assert_eq!(lists[c_mid as usize], vec![0], "Mitte sieht nur Licht A");
     assert_eq!(lists[c_edge as usize], vec![1], "Rand sieht nur Licht B");
     assert!(lists[c_corner as usize].is_empty(), "gegenueberliegende Ecke sieht keines");
+
+    // (0) GPU-Culling == CPU-Referenz, Index fuer Index: der
+    // Compute-Pass hat cluster_view_aabb + sphere_intersects_aabb
+    // exakt gespiegelt — alle Cluster, nicht nur die Proben-Pixel.
+    let gpu_lists = be.read_cluster_lights().expect("read_cluster_lights");
+    for (c, want) in lists.iter().enumerate() {
+        let base = c * CLUSTER_CAP as usize;
+        let capped = want.len().min((CLUSTER_CAP - 1) as usize);
+        assert_eq!(gpu_lists[base] as usize, capped, "cluster {c}: Anzahl");
+        assert_eq!(
+            &gpu_lists[base + 1..base + 1 + capped],
+            &want[..capped],
+            "cluster {c}: Indizes"
+        );
+    }
 
     // (1) G-Buffer: GPU-Pixel == CPU-pack(), Kanal fuer Kanal.
     for (label, x, y, s) in [

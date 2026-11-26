@@ -104,10 +104,13 @@ honest state of repair. ✅ done and test-covered · 🟡 partially built ·
 - [x] Clustered point lights in the deferred lighting pass: the shader
       finds each pixel's cluster (tile x log depth slice, depth
       reconstructed from the depth buffer) and sums its lights —
-      cluster lookup pixel-diff verified against `cull_lights()` on the
-      CPU (culling itself still runs CPU-side)
-- [ ] GPU compute light culling (mirror `cluster_view_aabb` +
-      `sphere_intersects_aabb` in a compute pass)
+      pixel-diff verified against the CPU reference through the HDR
+      target and the tone-mapped output
+- [x] GPU compute light culling: a compute pass mirrors
+      `cluster_view_aabb` + `sphere_intersects_aabb` and writes the
+      per-cluster light lists — verified index-for-index against
+      `cull_lights()` on the CPU across every cluster (the CPU core
+      remains the test reference)
 - [ ] Shadow 2.0 (cascaded + clustered)
 - [ ] Upscaling adapters: FSR / XeSS / DLSS ([rendering](rendering.md))
 - [ ] Render graph: declare the pass chain (shadow → G-buffer → lighting

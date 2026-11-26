@@ -107,11 +107,13 @@ mit ehrlichem Haken-Stand. ✅ fertig und testabgedeckt · 🟡 teilweise gebaut
 - [x] Geclusterte Punktlichter im Deferred-Lighting-Pass: der Shader
       findet den Cluster jedes Pixels (Kachel x logarithmische
       Tiefenscheibe, Tiefe aus dem Depth-Buffer rekonstruiert) und
-      summiert dessen Lichter — Cluster-Suche per Pixel-Diff gegen
-      `cull_lights()` auf der CPU verifiziert (das Culling selbst läuft
-      noch auf der CPU)
-- [ ] GPU-Compute-Licht-Culling (`cluster_view_aabb` +
-      `sphere_intersects_aabb` als Compute-Pass spiegeln)
+      summiert dessen Lichter — Pixel-Diff gegen die CPU-Referenz durch
+      das HDR-Ziel und das tone-gemappte Ergebnis verifiziert
+- [x] GPU-Compute-Licht-Culling: ein Compute-Pass spiegelt
+      `cluster_view_aabb` + `sphere_intersects_aabb` und schreibt die
+      Licht-Listen je Cluster — Index-fuer-Index gegen `cull_lights()`
+      auf der CPU verifiziert, ueber alle Cluster (der CPU-Kern bleibt
+      die Referenz im Test)
 - [ ] Shadow 2.0 (kaskadiert + geclustert)
 - [ ] Upscaling-Adapter: FSR / XeSS / DLSS ([rendering.de](rendering.de.md))
 - [ ] Render-Graph: die Pass-Kette (Shadow → G-Buffer → Lighting → Post)

@@ -125,8 +125,8 @@ struct ClusterInfo {
 };
 @group(1) @binding(6) var<uniform> cinfo : ClusterInfo;
 
-fn bound(i : u32) -> f32 {
-    return cinfo.bounds[i / 4u][i % 4u];
+fn bound(info : ClusterInfo, i : u32) -> f32 {
+    return info.bounds[i / 4u][i % 4u];
 }
 
 // Je Cluster CLUSTER_CAP Eintraege: Slot 0 = Anzahl, Slot 1.. = Licht-
@@ -146,12 +146,12 @@ struct LightGpu {
 /// der Spanne kein Cluster (-1).
 fn slice_of(d : f32) -> i32 {
     let nb = cinfo.n_bounds;
-    if (d < bound(0u) || d > bound(nb - 1u)) {
+    if (d < bound(cinfo, 0u) || d > bound(cinfo, nb - 1u)) {
         return -1;
     }
     var pp : u32 = 0u;
     for (var i = 0u; i < nb; i = i + 1u) {
-        if (bound(i) < d) {
+        if (bound(cinfo, i) < d) {
             pp = pp + 1u;
         }
     }
@@ -294,4 +294,82 @@ fn fs_tonemap(@builtin(position) frag : vec4<f32>) -> @location(0) vec4<f32> {
         tonemap_channel(exposed.z),
     );
     return vec4<f32>(mapped, c.a);
+}
+
+// ── Licht-Culling als Compute-Pass (M5, Box 2b) ──────────────────────
+// Ein Thread pro Cluster: View-Raum-AABB aufbauen (gespiegeltes
+// cluster_view_aabb) und jede Licht-Kugel dagegen testen (gespiegelte
+// sphere_intersects_aabb). Das ist exakt die Mathematik des CPU-
+// Referenzkerns re_render::cluster — der Pixel-Diff- und der
+// Listen-Vergleich-Test beweisen die Gleichheit Index-fuer-Index.
+// Lichter ueber der Cluster-Kapazitaet fallen deterministisch weg
+// (hoechste Index zuerst); die Test-Szene bleibt darunter.
+@group(0) @binding(0) var<uniform> cinfo_c : ClusterInfo;
+@group(0) @binding(1) var<storage, read> plights_c : array<LightGpu>;
+@group(0) @binding(2) var<storage, read_write> cluster_out : array<u32>;
+
+struct ClusterAabb {
+    mn : vec3<f32>,
+    mx : vec3<f32>,
+};
+
+/// View-Raum-AABB des Clusters — konservative Huellzelle ueber beide
+/// Scheiben-Tiefen (identisch zur CPU: Ecken bei zn und zf).
+fn cluster_aabb(tx : u32, ty : u32, z : u32) -> ClusterAabb {
+    let zn = bound(cinfo_c, z);
+    let zf = bound(cinfo_c, z + 1u);
+    let nx0 = 2.0 * f32(tx) / f32(cinfo_c.tiles_x) - 1.0;
+    let nx1 = 2.0 * f32(tx + 1u) / f32(cinfo_c.tiles_x) - 1.0;
+    let ny1 = 1.0 - 2.0 * f32(ty) / f32(cinfo_c.tiles_y);
+    let ny0 = 1.0 - 2.0 * f32(ty + 1u) / f32(cinfo_c.tiles_y);
+    // Startwerte: min sucht ab +Riesig, max sucht ab -Riesig — die
+    // echten Eckpunkte (Endlichkeit vorausgesetzt) gewinnen immer,
+    // damit ist das identisch zum CPU-splat(f32::MAX/MIN). Literal
+    // statt f32.max_value: dieses naga kennt Typ-Konstanten hier nicht.
+    var mn = vec3<f32>(1e30);
+    var mx = vec3<f32>(-1e30);
+    let xs = array<f32, 4>(nx0, nx0, nx1, nx1);
+    let ys = array<f32, 4>(ny0, ny1, ny0, ny1);
+    let ds = array<f32, 2>(zn, zf);
+    for (var e = 0u; e < 4u; e = e + 1u) {
+        for (var k = 0u; k < 2u; k = k + 1u) {
+            let c = vec3<f32>(
+                xs[e] * ds[k] / cinfo_c.proj_a,
+                ys[e] * ds[k] / cinfo_c.proj_b,
+                -ds[k],
+            );
+            mn = min(mn, c);
+            mx = max(mx, c);
+        }
+    }
+    return ClusterAabb(mn, mx);
+}
+
+@compute @workgroup_size(64)
+fn cs_cull(@builtin(global_invocation_id) gid : vec3<u32>) {
+    let cell = gid.x;
+    if (cell >= cinfo_c.tiles_x * cinfo_c.tiles_y * cinfo_c.slices) {
+        return;
+    }
+    // Koordinaten aus dem linearen Index — gespiegeltes coords():
+    // x am schnellsten, dann y, dann Scheibe.
+    let tx = cell % cinfo_c.tiles_x;
+    let ty = (cell / cinfo_c.tiles_x) % cinfo_c.tiles_y;
+    let z = cell / (cinfo_c.tiles_x * cinfo_c.tiles_y);
+    let bx = cluster_aabb(tx, ty, z);
+    let base = cell * CLUSTER_CAP;
+    var n : u32 = 0u;
+    for (var li = 0u; li < cinfo_c.light_count; li = li + 1u) {
+        let L = plights_c[li].pos_range;
+        // Kugel-AABB-Test: Distanz zum naechsten Punkt der Zelle.
+        let closest = clamp(L.xyz, bx.mn, bx.mx);
+        let d = closest - L.xyz;
+        if (dot(d, d) <= L.w * L.w) {
+            if (n < CLUSTER_CAP - 1u) {
+                cluster_out[base + 1u + n] = li;
+            }
+            n = n + 1u;
+        }
+    }
+    cluster_out[base] = min(n, CLUSTER_CAP - 1u);
 }

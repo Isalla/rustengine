@@ -162,6 +162,46 @@ pub(crate) fn readback_texture(
     Ok(out)
 }
 
+/// Bytes eines Storage-Buffers (GPU-Inhalt → CPU) — fuer den
+/// Listen-Vergleich des Compute-Cullings. Buffer-zu-Buffer-Kopien
+/// kennen keine Zeilen-Ausrichtung, also genueckt die exakte Groesse.
+pub(crate) fn readback_buffer(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    src: &wgpu::Buffer,
+    size: u64,
+) -> Result<Vec<u8>, GfxError> {
+    let staging = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("readback-buf"),
+        size,
+        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        mapped_at_creation: false,
+    });
+    let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some("readback-buf-enc"),
+    });
+    enc.copy_buffer_to_buffer(src, 0, &staging, 0, size);
+    queue.submit([enc.finish()]);
+    let slice = staging.slice(..);
+    let (tx, rx) = std::sync::mpsc::channel();
+    slice.map_async(wgpu::MapMode::Read, move |r| {
+        let _ = tx.send(r);
+    });
+    device
+        .poll(wgpu::PollType::wait_indefinitely())
+        .map_err(|e| GfxError::Device(format!("poll: {e}")))?;
+    rx.recv()
+        .map_err(|_| GfxError::Device("map-Kanal abgerissen".into()))?
+        .map_err(|e| GfxError::Device(format!("map: {e}")))?;
+    let view = slice
+        .get_mapped_range()
+        .map_err(|e| GfxError::Device(format!("mapped range: {e}")))?;
+    let out = view.to_vec();
+    drop(view);
+    staging.unmap();
+    Ok(out)
+}
+
 /// wgpu v30 liefert `impl Future` für Adapter/Device-Request. Ohne
 /// Async-Runtime im API-Vertrag des Traits: kleiner Spin-poll-Blocker
 /// (die Requests sind nach wenigen Polls fertig, kein Langzeit-Blocker).
@@ -646,6 +686,20 @@ impl WgpuBackend {
             .as_ref()
             .ok_or_else(|| GfxError::Device("kein Deferred-Frame gerendert".into()))?;
         d.read_depth(inner)
+    }
+
+    /// Die Licht-Listen des GPU-Compute-Cullings (CLUSTER_CAP Eintraege
+    /// je Cluster: Slot 0 = Anzahl, Slot 1.. = Indizes).
+    pub fn read_cluster_lights(&self) -> Result<Vec<u32>, GfxError> {
+        let inner = self
+            .inner
+            .as_ref()
+            .ok_or_else(|| GfxError::Device("init nicht ausgeführt".into()))?;
+        let d = self
+            .deferred
+            .as_ref()
+            .ok_or_else(|| GfxError::Device("kein Deferred-Frame gerendert".into()))?;
+        d.read_cluster_lights(inner)
     }
 
     /// Das beleuchtete Deferred-Ergebnis als RGBA8 (Zeilen ohne

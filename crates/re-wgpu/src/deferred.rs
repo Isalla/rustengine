@@ -1,5 +1,5 @@
-//! Deferred-Pipeline V2 (M5, Box 1 + HDR-Aufsatz): MRT-G-Buffer +
-//! Lighting-Pass (HDR-Float) + Tone-Mapping.
+//! Deferred-Pipeline V2 (M5, Box 1 + HDR-Aufsatz + Box 2): MRT-G-Buffer
+//! + Compute-Licht-Culling + Lighting-Pass (HDR-Float) + Tone-Mapping.
 //!
 //! Beweis-Strecke für ADR-0003: der Geometrie-Pass schreibt das Layout
 //! `GBufferLayout::deferred_v1()` (Albedo+Metallic, Oktaeder-Normalen+
@@ -12,7 +12,7 @@
 //! liefert das PNG als Sichtbeleg.
 
 use re_core::mesh::Mesh;
-use re_render::{cull_lights, Camera, ClusterGrid, GfxError, SphereLight, ToneCurve};
+use re_render::{Camera, ClusterGrid, GfxError, ToneCurve};
 
 const DEFERRED_SHADER: &str = include_str!("../deferred.wgsl");
 
@@ -277,6 +277,8 @@ pub(crate) struct Deferred {
     lights_buf: wgpu::Buffer,
     /// Kapazitaet von `lights_buf` in Lichtern (wachst bei Bedarf).
     lights_cap: usize,
+    g_cull: wgpu::BindGroupLayout,
+    pipe_cull: wgpu::ComputePipeline,
     pipe_geometry: wgpu::RenderPipeline,
     pipe_light: wgpu::RenderPipeline,
     pipe_tonemap: wgpu::RenderPipeline,
@@ -416,6 +418,43 @@ impl Deferred {
             ],
         });
 
+        // g_cull (Compute): Cluster-Uniform + Licht-Daten + Listen-Ziel.
+        let g_cull = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("d-g-cull"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+        });
+
         let cam_buf = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("d-cam-uni"),
             size: std::mem::size_of::<CamUni>() as u64,
@@ -515,7 +554,8 @@ impl Deferred {
         let cluster_lights_buf = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("d-cluster-lights"),
             size: (cluster_count * CLUSTER_CAP as u32 * 4) as u64,
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            // Der Compute-Pass schreibt die Listen, der Test liest sie.
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
             mapped_at_creation: false,
         });
         let lights_buf = device.create_buffer(&wgpu::BufferDescriptor {
@@ -658,6 +698,20 @@ impl Deferred {
             cache: None,
         });
 
+        let layout_cull = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("d-layout-cull"),
+            bind_group_layouts: &[Some(&g_cull)],
+            immediate_size: 0,
+        });
+        let pipe_cull = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("d-cull"),
+            layout: Some(&layout_cull),
+            module: &module,
+            entry_point: Some("cs_cull"),
+            compilation_options: Default::default(),
+            cache: None,
+        });
+
         Self {
             cam_buf,
             cam_bind,
@@ -682,6 +736,8 @@ impl Deferred {
             cluster_lights_buf,
             lights_buf,
             lights_cap: 1,
+            g_cull,
+            pipe_cull,
             pipe_geometry,
             pipe_light,
             pipe_tonemap,
@@ -741,113 +797,78 @@ impl Deferred {
         inner.queue.write_buffer(&self.cam_buf, 0, pod_bytes(&cam));
         inner.queue.write_buffer(&self.post_buf, 0, pod_bytes(&post));
 
-        // ── Geclusterte Lichter: Culling auf der CPU mit dem Referenz-
-        // kern `cull_lights` (re-render::cluster). Der Shader spiegelt
-        // nur die Cluster-Index-Mathematik — der Pixel-Diff-Test
-        // beweist, dass beide zum selben Ergebnis kommen. ──────────────
+        // ── Geclusterte Lichter: Das Culling uebernimmt der GPU-Compute-
+        // Pass `cs_cull` (gespiegeltes cluster_view_aabb +
+        // sphere_intersects_aabb aus re_render::cluster). Der CPU-Kern
+        // `cull_lights` bleibt als Referenz im Test — der
+        // Listen-Vergleich beweist die Gleichheit Index-fuer-Index. ──────
         let (w, h) = self.size;
-        let mut cuni = ClusterUni {
-            tiles_x: 1,
-            tiles_y: 1,
-            slices: CLUSTER_SLICES,
-            light_count: 0,
-            near: 0.1,
-            far: 4000.0,
-            proj_a: 1.0,
-            proj_b: 1.0,
+        let dr = camera.depth_range();
+        if !lights.is_empty() && dr.is_none() {
+            return Err(GfxError::Device("geclusterte Lichter brauchen eine Perspektiv-Kamera".into()));
+        }
+        let (near, far) = dr.unwrap_or((0.1, 4000.0));
+        let grid = ClusterGrid::for_render_size([w, h], CLUSTER_TILE, CLUSTER_SLICES, near, far);
+        let mut bounds = [[0.0f32; 4]; 3];
+        for s in 0..grid.slice_count() {
+            let (a, b) = grid.slice_bounds(s).unwrap_or((near, far));
+            bounds[s as usize / 4][s as usize % 4] = a;
+            bounds[(s as usize + 1) / 4][(s as usize + 1) % 4] = b;
+        }
+        let cuni = ClusterUni {
+            tiles_x: grid.tiles_x,
+            tiles_y: grid.tiles_y,
+            slices: grid.slice_count(),
+            light_count: lights.len() as u32,
+            near,
+            far,
+            proj_a: camera.proj.x_axis.x,
+            proj_b: camera.proj.y_axis.y,
             width: w,
             height: h,
             tile_size: CLUSTER_TILE,
-            n_bounds: CLUSTER_SLICES + 1,
-            bounds: [[0.0; 4]; 3],
+            n_bounds: grid.slice_count() + 1,
+            bounds,
         };
-        let mut cells: Vec<u32> = Vec::new();
-        let mut lgs: Vec<LightGpu> = Vec::new();
-        if !lights.is_empty() {
-            let (near, far) = camera.depth_range().ok_or_else(|| {
-                GfxError::Device("geclusterte Lichter brauchen eine Perspektiv-Kamera".into())
-            })?;
-            let grid =
-                ClusterGrid::for_render_size([w, h], CLUSTER_TILE, CLUSTER_SLICES, near, far);
-            let spheres: Vec<SphereLight> = lights
-                .iter()
-                .map(|l| {
-                    SphereLight::new(
-                        glam::Vec3::new(l.position[0], l.position[1], l.position[2]),
-                        l.range,
-                    )
-                })
-                .collect();
-            let lists = cull_lights(&grid, &camera.view, &camera.proj, &spheres);
-            // Packen: Slot 0 = Anzahl, Slot 1.. = Licht-Indizes.
-            for cell in &lists {
-                if cell.len() > (CLUSTER_CAP - 1) as usize {
-                    return Err(GfxError::Device(format!(
-                        "Cluster traegt {} Lichter — Kapazitaet sind {} (CLUSTER_CAP)",
-                        cell.len(),
-                        CLUSTER_CAP - 1
-                    )));
+        // Licht-Daten in den View-Raum — dieselbe Transformation wie im
+        // CPU-Referenzculling, die GPU prueft nur noch Kugel gegen Zelle.
+        let lgs: Vec<LightGpu> = lights
+            .iter()
+            .map(|l| {
+                let vp = camera.view.transform_point3(glam::Vec3::new(
+                    l.position[0],
+                    l.position[1],
+                    l.position[2],
+                ));
+                LightGpu {
+                    pos_range: [vp.x, vp.y, vp.z, l.range],
+                    color_intensity: [l.color[0], l.color[1], l.color[2], l.intensity],
                 }
-                cells.push(cell.len() as u32);
-                cells.extend(cell.iter());
-                while cells.len() % CLUSTER_CAP as usize != 0 {
-                    cells.push(0);
-                }
-            }
-            // Licht-Daten in den View-Raum — dieselbe Transformation
-            // wie im Culling, damit Liste und Position zusammenpassen.
-            lgs = lights
-                .iter()
-                .map(|l| {
-                    let vp = camera.view.transform_point3(glam::Vec3::new(
-                        l.position[0],
-                        l.position[1],
-                        l.position[2],
-                    ));
-                    LightGpu {
-                        pos_range: [vp.x, vp.y, vp.z, l.range],
-                        color_intensity: [l.color[0], l.color[1], l.color[2], l.intensity],
-                    }
-                })
-                .collect();
-            let mut bounds = [[0.0f32; 4]; 3];
-            for s in 0..grid.slice_count() {
-                let (a, b) = grid.slice_bounds(s).unwrap_or((near, far));
-                bounds[s as usize / 4][s as usize % 4] = a;
-                bounds[(s as usize + 1) / 4][(s as usize + 1) % 4] = b;
-            }
-            cuni = ClusterUni {
-                tiles_x: grid.tiles_x,
-                tiles_y: grid.tiles_y,
-                slices: grid.slice_count(),
-                light_count: lights.len() as u32,
-                near,
-                far,
-                proj_a: camera.proj.x_axis.x,
-                proj_b: camera.proj.y_axis.y,
-                width: w,
-                height: h,
-                tile_size: CLUSTER_TILE,
-                n_bounds: grid.slice_count() + 1,
-                bounds,
-            };
-            if lights.len() > self.lights_cap {
-                self.lights_cap = lights.len();
-                self.lights_buf = inner.device.create_buffer(&wgpu::BufferDescriptor {
-                    label: Some("d-lights"),
-                    size: (self.lights_cap * std::mem::size_of::<LightGpu>()) as u64,
-                    usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-                    mapped_at_creation: false,
-                });
-            }
+            })
+            .collect();
+        if lights.len() > self.lights_cap {
+            self.lights_cap = lights.len();
+            self.lights_buf = inner.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("d-lights"),
+                size: (self.lights_cap * std::mem::size_of::<LightGpu>()) as u64,
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
         }
         inner.queue.write_buffer(&self.cluster_uni_buf, 0, pod_bytes(&cuni));
-        if !cells.is_empty() {
-            inner.queue.write_buffer(&self.cluster_lights_buf, 0, pod_vec_bytes(&cells));
-        }
         if !lgs.is_empty() {
             inner.queue.write_buffer(&self.lights_buf, 0, pod_vec_bytes(&lgs));
         }
+        let cull_bind = inner.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("d-cull-bind"),
+            layout: &self.g_cull,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: self.cluster_uni_buf.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: self.lights_buf.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 2, resource: self.cluster_lights_buf.as_entire_binding() },
+            ],
+        });
+        let cluster_count = grid.cluster_count();
         // Bind-Group pro Frame: Groessen der Licht-Buffer wechseln mit
         // der Szenen-Lichtzahl; das Anlegen kostet Mikrosekunden.
         let light_bind = inner.device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -962,6 +983,17 @@ impl Deferred {
                 pass.draw_indexed(0..p.n_indices, 0, 0..1);
             }
         }
+        // Licht-Culling auf der GPU — muss vor dem Lighting-Pass laufen,
+        // der die Listen liest.
+        {
+            let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("d-cull"),
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(&self.pipe_cull);
+            pass.set_bind_group(0, &cull_bind, &[]);
+            pass.dispatch_workgroups(cluster_count.div_ceil(64), 1, 1);
+        }
         {
             let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("d-light"),
@@ -1032,6 +1064,24 @@ impl Deferred {
         Ok(raw
             .chunks_exact(4)
             .map(|c| f32::from_bits(u32::from_le_bytes([c[0], c[1], c[2], c[3]])))
+            .collect())
+    }
+
+    /// Die Licht-Listen des Compute-Cullings, roh (CLUSTER_CAP Eintraege
+    /// je Cluster: Slot 0 = Anzahl, Slot 1.. = Indizes) — fuer den
+    /// Listen-Vergleich gegen die CPU-Referenz.
+    pub(crate) fn read_cluster_lights(&self, inner: &Inner) -> Result<Vec<u32>, GfxError> {
+        let (w, h) = self.size;
+        let clusters = w.div_ceil(CLUSTER_TILE) * h.div_ceil(CLUSTER_TILE) * CLUSTER_SLICES;
+        let bytes = crate::readback_buffer(
+            &inner.device,
+            &inner.queue,
+            &self.cluster_lights_buf,
+            u64::from(clusters * CLUSTER_CAP * 4),
+        )?;
+        Ok(bytes
+            .chunks_exact(4)
+            .map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]]))
             .collect())
     }
 
