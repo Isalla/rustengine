@@ -1,19 +1,30 @@
-//! Beweis für ADR-0003 Box 1 + HDR-Aufsatz: der GPU-G-Buffer (MRT,
-//! WGSL) liefert dieselben Pixel wie die CPU-Referenz
-//! `GBufferLayout::pack()`; der Lighting-Pass schreibt ein HDR-Float-
-//! Ziel, das Werte ueber 1.0 erhaelt (CPU-Vergleich in Float-
-//! Praezision); der Tone-Mapping-Pass endet bei densben Display-
-//! Farben wie `HdrPipeline::process()` auf der CPU. Laedt den
-//! Software-Adapter (llvmpipe) — laeuft headless auf dem Pi und in
-//! der CI.
+//! Beweis für ADR-0003 Box 1 + HDR-Aufsatz + geclusterte Lichter: der
+//! GPU-G-Buffer (MRT, WGSL) liefert dieselben Pixel wie die CPU-
+//! Referenz `GBufferLayout::pack()`; der Lighting-Pass schreibt ein
+//! HDR-Float-Ziel, das Werte ueber 1.0 erhaelt (CPU-Vergleich in
+//! Float-Praezision); die Cluster-Suche des Shaders waehlt dieselben
+//! Licht-Listen wie `cull_lights` auf der CPU; der Tone-Mapping-Pass
+//! endet bei denselben Display-Farben wie `HdrPipeline::process()`.
+//! Laedt den Software-Adapter (llvmpipe) — laeuft headless auf dem
+//! Pi und in der CI.
 
 use re_core::mesh::Mesh;
-use re_render::{Camera, GBufferLayout, GfxBackend, HdrPipeline, Surface, ToneCurve};
-use re_wgpu::{DeferredBatch, DeferredHdr, WgpuBackend};
+use re_render::{
+    cull_lights, Camera, ClusterGrid, GBufferLayout, GfxBackend, HdrPipeline, SphereLight,
+    Surface, ToneCurve,
+};
+use re_wgpu::{
+    DeferredBatch, DeferredHdr, DeferredLight, WgpuBackend, CLUSTER_SLICES, CLUSTER_TILE,
+};
 
-fn quad(normal: [f32; 3]) -> Mesh {
+fn quad(normal: [f32; 3], half: f32) -> Mesh {
     Mesh {
-        positions: vec![[-1.0, -1.0, 0.0], [1.0, -1.0, 0.0], [1.0, 1.0, 0.0], [-1.0, 1.0, 0.0]],
+        positions: vec![
+            [-half, -half, 0.0],
+            [half, -half, 0.0],
+            [half, half, 0.0],
+            [-half, half, 0.0],
+        ],
         normals: Some(vec![normal; 4]),
         uvs: Some(vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]),
         indices: Some(vec![0, 1, 2, 0, 2, 3]),
@@ -64,19 +75,23 @@ fn gpu_gbuffer_und_lighting_matchen_cpu_referenz() {
         return;
     }
     be.resize(64, 64);
-    // Orthografisch: deterministische Pixel-Abdeckung fuer die
-    // Tiefen-Proben (Mitte = Wuerfel, Rand = Flaeche). Die Face-
-    // Normalen des Wuerfels sind konstant pro Dreieck, damit ist die
-    // Interpolation egal — die G-Buffer-Kanale matchen exakt.
-    let cam = Camera::orthographic(
+    // Perspektivkamera: die Cluster-Mathematik (cluster_view_aabb,
+    // slice_of) ist perspektivisch definiert — Ortho-Cluster gaebe es
+    // nicht. Der Wuerfel (0.6-Kante) fuellt die Mitte, die Flaeche in
+    // 22 Einheiten Entfernung deckt den Rest des Frustums. Die
+    // Proben-Pixel liegen bewusst in verschiedenen Kacheln UND
+    // Tiefenscheiben: Wuerfel (Sichttiefe 1.7) in Scheibe 1, Flaeche
+    // (22.0) in Scheibe 2 — eine falsche Scheibenwahl des Shaders
+    // aendert die Licht-Liste und damit das Pixel.
+    let cam = Camera::perspective(
         glam::Vec3::new(0.0, 0.0, 2.0),
         glam::Vec3::ZERO,
         glam::Vec3::Y,
-        2.0,
+        std::f32::consts::FRAC_PI_3,
         1.0,
     );
 
-    let bg = quad([0.0, 0.0, 1.0]);
+    let bg = quad([0.0, 0.0, 1.0], 30.0);
     let cb = cube();
     let s_quad = Surface {
         albedo: [0.2, 0.6, 0.4],
@@ -97,7 +112,7 @@ fn gpu_gbuffer_und_lighting_matchen_cpu_referenz() {
     let batches = [
         DeferredBatch {
             mesh: &bg,
-            world: glam::Mat4::from_translation(glam::Vec3::new(0.0, 0.0, -1.0)),
+            world: glam::Mat4::from_translation(glam::Vec3::new(0.0, 0.0, -20.0)),
             albedo: s_quad.albedo,
             metallic: s_quad.metallic,
             roughness: s_quad.roughness,
@@ -113,16 +128,53 @@ fn gpu_gbuffer_und_lighting_matchen_cpu_referenz() {
         },
     ];
 
+    // Zwei Punktlichter, so gesetzt, dass jeder Proben-Pixel genau
+    // eine andere Licht-Liste sieht: A erreicht nur den Wuerfel
+    // (Scheibe 1), B nur die Flaeche links oben (Kachel (0,0),
+    // Scheibe 2), die Ecke rechts unten sieht keines.
+    let lights = [
+        DeferredLight {
+            position: [0.0, 0.0, 1.0],
+            range: 1.0,
+            color: [1.0, 0.6, 0.3],
+            intensity: 8.0,
+        },
+        DeferredLight {
+            position: [-10.9, 10.9, -19.5],
+            range: 1.0,
+            color: [0.3, 0.5, 1.0],
+            intensity: 8.0,
+        },
+    ];
+
     let hdr = DeferredHdr { exposure: 1.0, light_intensity: 5.0, curve: ToneCurve::Aces };
-    be.render_deferred(&cam, &batches, hdr).expect("render_deferred");
+    be.render_deferred(&cam, &batches, hdr, &lights).expect("render_deferred");
     let gb = be.read_gbuffer().expect("read_gbuffer");
     let hdr_rb = be.read_hdr().expect("read_hdr");
+    let depth = be.read_deferred_depth().expect("read_deferred_depth");
     let (fw, fh, final_rgba) = be.read_deferred_rgba().expect("readback final");
     assert_eq!((fw, fh), (64, 64));
 
     let layout = GBufferLayout::deferred_v1();
     let light = glam::Vec3::new(0.45, 0.82, 0.35).normalize();
     let pipe = HdrPipeline { exposure: hdr.exposure, curve: hdr.curve };
+
+    // ── Cluster-Referenz auf der CPU: derselbe Kern, dieselben Werte ──
+    let (near, far) = cam.depth_range().expect("Perspektivkamera");
+    let grid = ClusterGrid::for_render_size([64, 64], CLUSTER_TILE, CLUSTER_SLICES, near, far);
+    let spheres: Vec<SphereLight> =
+        lights.iter().map(|l| SphereLight::new(glam::Vec3::from(l.position), l.range)).collect();
+    let lists = cull_lights(&grid, &cam.view, &cam.proj, &spheres);
+
+    // Differenzierungs-Beweis (CPU-Seite): die drei Proben-Pixel
+    // liegen in verschiedenen Clustern mit verschiedenen Listen.
+    let c_mid = grid.locate(32, 32, CLUSTER_TILE, 1.7).expect("Wuerfel-Cluster");
+    let c_edge = grid.locate(4, 4, CLUSTER_TILE, 22.0).expect("Flaechen-Cluster");
+    let c_corner = grid.locate(60, 60, CLUSTER_TILE, 22.0).expect("Ecken-Cluster");
+    assert_ne!(c_mid, c_edge, "Wuerfel und Flaeche liegen in verschiedenen Clustern");
+    assert_eq!(lists[c_mid as usize], vec![0], "Mitte sieht nur Licht A");
+    assert_eq!(lists[c_edge as usize], vec![1], "Rand sieht nur Licht B");
+    assert!(lists[c_corner as usize].is_empty(), "gegenueberliegende Ecke sieht keines");
 
     // (1) G-Buffer: GPU-Pixel == CPU-pack(), Kanal fuer Kanal.
     for (label, x, y, s) in [
@@ -149,10 +201,14 @@ fn gpu_gbuffer_und_lighting_matchen_cpu_referenz() {
     }
 
     // (2) HDR-Ziel + Tone-Mapping: GPU == CPU-Referenz aus denselben
-    // G-Buffer-Bytes. Der Float-Kanal beweist echtes HDR: Werte ueber
-    // 1.0 ueberleben das Lighting-Ziel und werden erst vom Tone-Mapper
-    // gestaucht — ein 8-Bit-Ziel koennte das nicht.
+    // G-Buffer-Bytes und derselben Depth. Der Float-Kanal beweist
+    // echtes HDR: Werte ueber 1.0 ueberleben das Lighting-Ziel und
+    // werden erst vom Tone-Mapper gestaucht — ein 8-Bit-Ziel koennte
+    // das nicht. Die Cluster-Summe der CPU trifft nur dann dieselben
+    // Werte, wenn der Shader denselben Cluster gewaehlt hat.
     let mut hdr_max = 0.0f32;
+    let pa = cam.proj.x_axis.x;
+    let pb = cam.proj.y_axis.y;
     for (x, y) in [(32u32, 32u32), (4, 4), (60, 60)] {
         let vel = gb.velocity(x, y);
         let surf = layout.unpack(&[
@@ -161,8 +217,37 @@ fn gpu_gbuffer_und_lighting_matchen_cpu_referenz() {
             [vel[0], vel[1], 0.0, 0.0],
         ]);
         let ndl = surf.normal.dot(light).max(0.0);
-        let linear: [f32; 3] =
-            surf.albedo.map(|c| c * (0.1 + 0.9 * ndl) * hdr.light_intensity);
+        // Gespiegelte Shader-Mathe: Depth -> Sichttiefe -> View-Punkt
+        // -> Cluster -> Licht-Summe (Lambert + quadratischer Falloff).
+        let z = depth[(y * fw + x) as usize];
+        let mut sum = [0.0f32; 3];
+        if z < 1.0 {
+            let d = near * far / (far - z * (far - near));
+            let ndc_x = 2.0 * (x as f32 + 0.5) / fw as f32 - 1.0;
+            let ndc_y = 1.0 - 2.0 * (y as f32 + 0.5) / fh as f32;
+            let p = glam::Vec3::new(ndc_x * d / pa, ndc_y * d / pb, -d);
+            if let Some(sl) = grid.slice_of(d) {
+                let tx = (x / CLUSTER_TILE).min(grid.tiles_x - 1);
+                let ty = (y / CLUSTER_TILE).min(grid.tiles_y - 1);
+                for &li in &lists[grid.index(tx, ty, sl) as usize] {
+                    let l = &lights[li as usize];
+                    let lv = cam.view.transform_point3(glam::Vec3::from(l.position));
+                    let v = lv - p;
+                    let dist = v.length();
+                    let t = (1.0 - dist / l.range).clamp(0.0, 1.0);
+                    let att = t * t;
+                    if att > 0.0 {
+                        let ndl2 = surf.normal.dot(v / dist.max(1e-7)).max(0.0);
+                        for k in 0..3 {
+                            sum[k] += l.color[k] * l.intensity * att * ndl2;
+                        }
+                    }
+                }
+            }
+        }
+        let linear: [f32; 3] = std::array::from_fn(|k| {
+            surf.albedo[k] * ((0.1 + 0.9 * ndl) + sum[k]) * hdr.light_intensity
+        });
         let gpu_hdr = hdr_rb.pixel(x, y);
         for k in 0..3 {
             assert!(

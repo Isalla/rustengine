@@ -12,7 +12,7 @@
 //! liefert das PNG als Sichtbeleg.
 
 use re_core::mesh::Mesh;
-use re_render::{Camera, GfxError, ToneCurve};
+use re_render::{cull_lights, Camera, ClusterGrid, GfxError, SphereLight, ToneCurve};
 
 const DEFERRED_SHADER: &str = include_str!("../deferred.wgsl");
 
@@ -121,6 +121,55 @@ impl DeferredHdr {
     }
 }
 
+/// Ein Punktlicht der geclusterten Beleuchtung (M5, Box 2). Position in
+/// Weltkoordinaten; `range` ist die Reichweite der Culling-Kugel und
+/// zugleich die Grenze des Distanz-Falloffs (quadratisch, hart bei
+/// `range`). Farbe linear, Intensitaet multipliziert — Werte ueber 1
+/// sind ausdruecklich erlaubt (HDR).
+#[derive(Clone, Copy, Debug)]
+pub struct DeferredLight {
+    pub position: [f32; 3],
+    pub range: f32,
+    pub color: [f32; 3],
+    pub intensity: f32,
+}
+
+/// Kachelgroesse in Pixeln, Tiefenscheiben und Cluster-Kapazitaet —
+/// dieselben Werte wie in `deferred.wgsl` (CLUSTER_CAP) und im Test.
+pub const CLUSTER_TILE: u32 = 16;
+pub const CLUSTER_SLICES: u32 = 4;
+pub const CLUSTER_CAP: u32 = 8;
+
+/// WGSL-Seite von `struct ClusterInfo` (Reihenfolge = Shader).
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct ClusterUni {
+    tiles_x: u32,
+    tiles_y: u32,
+    slices: u32,
+    light_count: u32,
+    near: f32,
+    far: f32,
+    proj_a: f32,
+    proj_b: f32,
+    width: u32,
+    height: u32,
+    tile_size: u32,
+    n_bounds: u32,
+    /// Scheibengrenzen, 4 pro vec4 (Uniform-Stride-Regel im Shader):
+    /// bound i = bounds[i/4][i%4], belegt bis n_bounds <= 12.
+    bounds: [[f32; 4]; 3],
+}
+
+/// WGSL-Seite von `struct LightGpu`: Position im View-Raum (die
+/// CPU rechnet sie um — dieselbe Transformation wie im Culling).
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct LightGpu {
+    pos_range: [f32; 4],
+    color_intensity: [f32; 4],
+}
+
 /// Roh-Inhalt des HDR-Float-Targets (RGBA32F) nach einem Frame.
 /// 16 Byte/Pixel; der Beweis, dass Werte ueber 1.0 die Kette
 /// durchlaufen — ein 8-Bit-Ziel koennte das nicht.
@@ -207,7 +256,6 @@ pub(crate) struct Deferred {
     gb1_view: wgpu::TextureView,
     gb2: wgpu::Texture,
     gb2_view: wgpu::TextureView,
-    #[allow(dead_code)] // bleibt alive, solange depth_view referenziert wird
     depth: wgpu::Texture,
     depth_view: wgpu::TextureView,
     #[allow(dead_code)] // dito: final_tex naehrt final_view
@@ -219,7 +267,16 @@ pub(crate) struct Deferred {
     hdr_view: wgpu::TextureView,
     post_buf: wgpu::Buffer,
     post_bind: wgpu::BindGroup,
-    light_bind: wgpu::BindGroup,
+    /// Layout des Lighting-Passes — der Bind-Group-Wechsel (Lichtzahl
+    /// aendert die Buffer-Groesse) passiert pro Frame in `render`.
+    g1_light: wgpu::BindGroupLayout,
+    /// Point-Sampler fuer die G-Buffer-Reads des Lighting-Passes.
+    sampler: wgpu::Sampler,
+    cluster_uni_buf: wgpu::Buffer,
+    cluster_lights_buf: wgpu::Buffer,
+    lights_buf: wgpu::Buffer,
+    /// Kapazitaet von `lights_buf` in Lichtern (wachst bei Bedarf).
+    lights_cap: usize,
     pipe_geometry: wgpu::RenderPipeline,
     pipe_light: wgpu::RenderPipeline,
     pipe_tonemap: wgpu::RenderPipeline,
@@ -296,6 +353,48 @@ impl Deferred {
                     },
                     count: None,
                 },
+                // Cluster-Lichter: Depth-Textur, Cluster-Uniform,
+                // Licht-Listen und Licht-Daten (Storage, nur lesend).
+                wgpu::BindGroupLayoutEntry {
+                    binding: 5,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Depth,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 6,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 7,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 8,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
             ],
         });
         // g0 (Tonemap): HDR-Textur + Post-Uniform (eigene Pipeline-Layout-
@@ -357,7 +456,12 @@ impl Deferred {
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: wgpu::TextureFormat::Depth32Float,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            // RENDER_ATTACHMENT (Geometrie-Pass) + TEXTURE_BINDING
+            // (Lighting-Pass rekonstruiert die Sichttiefe) + COPY_SRC
+            // (Readback fuer den Pixel-Diff-Test).
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                | wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::COPY_SRC,
             view_formats: &[],
         });
         // Ziel des Tone-Mapping-Passes: sRGB wie der Forward-Offscreen-
@@ -396,16 +500,29 @@ impl Deferred {
         let final_view = final_tex.create_view(&wgpu::TextureViewDescriptor::default());
         let hdr_view = hdr.create_view(&wgpu::TextureViewDescriptor::default());
 
-        let light_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("d-light-bind"),
-            layout: &g1_light,
-            entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&gb0_view) },
-                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&gb1_view) },
-                wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&gb2_view) },
-                wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::Sampler(&sampler) },
-                wgpu::BindGroupEntry { binding: 4, resource: post_buf.as_entire_binding() },
-            ],
+        // Cluster-Buffer fuer die Lighting-Pipeline (M5, Box 2). Die
+        // Licht-Listen haben Fixed-Stride je Cluster; die Licht-Daten
+        // wachsen bei Bedarf ( lights_cap ). Groessen hier minimal —
+        // render() schreibt nur so viel, wie die Frame-Lichter fuellen.
+        let cluster_count =
+            w.max(1).div_ceil(CLUSTER_TILE) * h.max(1).div_ceil(CLUSTER_TILE) * CLUSTER_SLICES;
+        let cluster_uni_buf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("d-cluster-uni"),
+            size: std::mem::size_of::<ClusterUni>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let cluster_lights_buf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("d-cluster-lights"),
+            size: (cluster_count * CLUSTER_CAP as u32 * 4) as u64,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let lights_buf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("d-lights"),
+            size: std::mem::size_of::<LightGpu>() as u64,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
         });
         let post_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("d-post-bind"),
@@ -559,7 +676,12 @@ impl Deferred {
             hdr_view,
             post_buf,
             post_bind,
-            light_bind,
+            g1_light,
+            sampler,
+            cluster_uni_buf,
+            cluster_lights_buf,
+            lights_buf,
+            lights_cap: 1,
             pipe_geometry,
             pipe_light,
             pipe_tonemap,
@@ -596,15 +718,17 @@ impl Deferred {
         })
     }
 
-    /// Ein Frame: Geometrie-Pass (MRT) → Lighting-Pass (→ HDR-Float) →
-    /// Tone-Mapping (→ `final_tex`). Ruft vorher `resize` auf, wenn die
-    /// Größe wechselt.
+    /// Ein Frame: Geometrie-Pass (MRT) → Lighting-Pass (→ HDR-Float,
+    /// inkl. geclusterter Punktlichter) → Tone-Mapping (→ `final_tex`).
+    /// Ruft vorher `resize` auf, wenn die Größe wechselt.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn render(
         &mut self,
         inner: &mut Inner,
         camera: &Camera,
         batches: &[DeferredBatch],
         hdr: DeferredHdr,
+        lights: &[DeferredLight],
     ) -> Result<(), GfxError> {
         if self.size != inner.size {
             self.resize(inner);
@@ -616,6 +740,131 @@ impl Deferred {
         };
         inner.queue.write_buffer(&self.cam_buf, 0, pod_bytes(&cam));
         inner.queue.write_buffer(&self.post_buf, 0, pod_bytes(&post));
+
+        // ── Geclusterte Lichter: Culling auf der CPU mit dem Referenz-
+        // kern `cull_lights` (re-render::cluster). Der Shader spiegelt
+        // nur die Cluster-Index-Mathematik — der Pixel-Diff-Test
+        // beweist, dass beide zum selben Ergebnis kommen. ──────────────
+        let (w, h) = self.size;
+        let mut cuni = ClusterUni {
+            tiles_x: 1,
+            tiles_y: 1,
+            slices: CLUSTER_SLICES,
+            light_count: 0,
+            near: 0.1,
+            far: 4000.0,
+            proj_a: 1.0,
+            proj_b: 1.0,
+            width: w,
+            height: h,
+            tile_size: CLUSTER_TILE,
+            n_bounds: CLUSTER_SLICES + 1,
+            bounds: [[0.0; 4]; 3],
+        };
+        let mut cells: Vec<u32> = Vec::new();
+        let mut lgs: Vec<LightGpu> = Vec::new();
+        if !lights.is_empty() {
+            let (near, far) = camera.depth_range().ok_or_else(|| {
+                GfxError::Device("geclusterte Lichter brauchen eine Perspektiv-Kamera".into())
+            })?;
+            let grid =
+                ClusterGrid::for_render_size([w, h], CLUSTER_TILE, CLUSTER_SLICES, near, far);
+            let spheres: Vec<SphereLight> = lights
+                .iter()
+                .map(|l| {
+                    SphereLight::new(
+                        glam::Vec3::new(l.position[0], l.position[1], l.position[2]),
+                        l.range,
+                    )
+                })
+                .collect();
+            let lists = cull_lights(&grid, &camera.view, &camera.proj, &spheres);
+            // Packen: Slot 0 = Anzahl, Slot 1.. = Licht-Indizes.
+            for cell in &lists {
+                if cell.len() > (CLUSTER_CAP - 1) as usize {
+                    return Err(GfxError::Device(format!(
+                        "Cluster traegt {} Lichter — Kapazitaet sind {} (CLUSTER_CAP)",
+                        cell.len(),
+                        CLUSTER_CAP - 1
+                    )));
+                }
+                cells.push(cell.len() as u32);
+                cells.extend(cell.iter());
+                while cells.len() % CLUSTER_CAP as usize != 0 {
+                    cells.push(0);
+                }
+            }
+            // Licht-Daten in den View-Raum — dieselbe Transformation
+            // wie im Culling, damit Liste und Position zusammenpassen.
+            lgs = lights
+                .iter()
+                .map(|l| {
+                    let vp = camera.view.transform_point3(glam::Vec3::new(
+                        l.position[0],
+                        l.position[1],
+                        l.position[2],
+                    ));
+                    LightGpu {
+                        pos_range: [vp.x, vp.y, vp.z, l.range],
+                        color_intensity: [l.color[0], l.color[1], l.color[2], l.intensity],
+                    }
+                })
+                .collect();
+            let mut bounds = [[0.0f32; 4]; 3];
+            for s in 0..grid.slice_count() {
+                let (a, b) = grid.slice_bounds(s).unwrap_or((near, far));
+                bounds[s as usize / 4][s as usize % 4] = a;
+                bounds[(s as usize + 1) / 4][(s as usize + 1) % 4] = b;
+            }
+            cuni = ClusterUni {
+                tiles_x: grid.tiles_x,
+                tiles_y: grid.tiles_y,
+                slices: grid.slice_count(),
+                light_count: lights.len() as u32,
+                near,
+                far,
+                proj_a: camera.proj.x_axis.x,
+                proj_b: camera.proj.y_axis.y,
+                width: w,
+                height: h,
+                tile_size: CLUSTER_TILE,
+                n_bounds: grid.slice_count() + 1,
+                bounds,
+            };
+            if lights.len() > self.lights_cap {
+                self.lights_cap = lights.len();
+                self.lights_buf = inner.device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("d-lights"),
+                    size: (self.lights_cap * std::mem::size_of::<LightGpu>()) as u64,
+                    usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                });
+            }
+        }
+        inner.queue.write_buffer(&self.cluster_uni_buf, 0, pod_bytes(&cuni));
+        if !cells.is_empty() {
+            inner.queue.write_buffer(&self.cluster_lights_buf, 0, pod_vec_bytes(&cells));
+        }
+        if !lgs.is_empty() {
+            inner.queue.write_buffer(&self.lights_buf, 0, pod_vec_bytes(&lgs));
+        }
+        // Bind-Group pro Frame: Groessen der Licht-Buffer wechseln mit
+        // der Szenen-Lichtzahl; das Anlegen kostet Mikrosekunden.
+        let light_bind = inner.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("d-light-bind"),
+            layout: &self.g1_light,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&self.gb0_view) },
+                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&self.gb1_view) },
+                wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&self.gb2_view) },
+                wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::Sampler(&self.sampler) },
+                wgpu::BindGroupEntry { binding: 4, resource: self.post_buf.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 5, resource: wgpu::BindingResource::TextureView(&self.depth_view) },
+                wgpu::BindGroupEntry { binding: 6, resource: self.cluster_uni_buf.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 7, resource: self.cluster_lights_buf.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 8, resource: self.lights_buf.as_entire_binding() },
+            ],
+        });
 
         // Batches vorbereiten (Mesh-Upload + Uniform + Bind-Group).
         struct Prep {
@@ -730,7 +979,7 @@ impl Deferred {
             });
             pass.set_pipeline(&self.pipe_light);
             pass.set_bind_group(0, &self.cam_bind, &[]);
-            pass.set_bind_group(1, &self.light_bind, &[]);
+            pass.set_bind_group(1, &light_bind, &[]);
             pass.draw(0..3, 0..1);
         }
         {
@@ -772,6 +1021,18 @@ impl Deferred {
             height: h,
             data: crate::readback_texture(&inner.device, &inner.queue, &self.hdr, w, h, 16)?,
         })
+    }
+
+    /// Die Depth-Buffer des Geometrie-Passes als f32 — der Test
+    /// rekonstruiert damit dieselbe Sichttiefe wie der Shader, ohne
+    /// dass Rundungsunterschiede die Cluster-Wahl verschieben.
+    pub(crate) fn read_depth(&self, inner: &Inner) -> Result<Vec<f32>, GfxError> {
+        let (w, h) = self.size;
+        let raw = crate::readback_texture(&inner.device, &inner.queue, &self.depth, w, h, 4)?;
+        Ok(raw
+            .chunks_exact(4)
+            .map(|c| f32::from_bits(u32::from_le_bytes([c[0], c[1], c[2], c[3]])))
+            .collect())
     }
 
     /// G-Buffer-Targets auslesen (für den Pixel-Diff gegen die

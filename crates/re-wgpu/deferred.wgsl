@@ -98,6 +98,109 @@ struct Post {
 };
 @group(1) @binding(4) var<uniform> post : Post;
 
+// ── Geclusterte Punktlichter (M5, Box 2) ──────────────────────────────
+// Der Lighting-Pass findet zu jedem Pixel seinen Cluster (Kachel x
+// Tiefenscheibe) und addiert nur dessen Lichter. Die Cluster-Index-
+// Mathematik spiegelt re_render::cluster (slice_of/index) Kanal-fuer-
+// Kanal; die Scheibengrenzen kommen fertig gerechnet vom CPU-Kern
+// (cull_lights laeuft ebenfalls dort — der GPU-Compute-Cull folgt).
+@group(1) @binding(5) var gb_depth : texture_depth_2d;
+
+struct ClusterInfo {
+    tiles_x : u32,
+    tiles_y : u32,
+    slices : u32,
+    light_count : u32,
+    near : f32,
+    far : f32,
+    proj_a : f32,   // proj.x_axis.x = cot(fov_x/2)
+    proj_b : f32,   // proj.y_axis.y = cot(fov_y/2)
+    width : u32,
+    height : u32,
+    tile_size : u32,
+    n_bounds : u32, // = slices + 1
+    // Scheibengrenzen als vec4 gepackt (Uniform-Arrays brauchen
+    // Stride-Vielfache von 16): bound i = bounds[i/4][i%4], bis 12.
+    bounds : array<vec4<f32>, 3>,
+};
+@group(1) @binding(6) var<uniform> cinfo : ClusterInfo;
+
+fn bound(i : u32) -> f32 {
+    return cinfo.bounds[i / 4u][i % 4u];
+}
+
+// Je Cluster CLUSTER_CAP Eintraege: Slot 0 = Anzahl, Slot 1.. = Licht-
+// index. Fixed-Stride statt Offset-Tabelle — fuer die Beweis-Kette
+// einfach und exakt; echte Szenen spaeter mit compaction.
+const CLUSTER_CAP : u32 = 8u;
+@group(1) @binding(7) var<storage, read> cluster_lights : array<u32>;
+
+struct LightGpu {
+    pos_range : vec4<f32>,        // xyz = Position im View-Raum, w = Reichweite
+    color_intensity : vec4<f32>,  // rgb = Farbe, a = Intensitaet
+};
+@group(1) @binding(8) var<storage, read> plights : array<LightGpu>;
+
+/// Scheibe einer Sichttiefe — gespiegeltes `ClusterGrid::slice_of`:
+/// Grenzen liegen an der *unteren* Scheibe (partition_point), außerhalb
+/// der Spanne kein Cluster (-1).
+fn slice_of(d : f32) -> i32 {
+    let nb = cinfo.n_bounds;
+    if (d < bound(0u) || d > bound(nb - 1u)) {
+        return -1;
+    }
+    var pp : u32 = 0u;
+    for (var i = 0u; i < nb; i = i + 1u) {
+        if (bound(i) < d) {
+            pp = pp + 1u;
+        }
+    }
+    return i32(min(max(pp, 1u) - 1u, cinfo.slices - 1u));
+}
+
+/// Summe aller Punktlicht-Beitraege des Pixels (Lambert + quadrati-
+/// scher Distanz-Falloff innerhalb der Reichweite).
+fn cluster_light_sum(coords : vec2<u32>, normal : vec3<f32>) -> vec3<f32> {
+    var sum = vec3<f32>(0.0);
+    if (cinfo.light_count == 0u) {
+        return sum;
+    }
+    let depth = textureLoad(gb_depth, vec2<i32>(coords), 0);
+    if (depth >= 1.0) {
+        return sum; // Hintergrund ohne Geometrie — kein rekonstruierbarer Punkt
+    }
+    // Sichttiefe aus nicht-linearem Depth rekonstruieren (perspective_rh,
+    // Depth 0..1): d = n*f / (f - z*(f - n)).
+    let d = cinfo.near * cinfo.far / (cinfo.far - depth * (cinfo.far - cinfo.near));
+    let ndc_x = 2.0 * (f32(coords.x) + 0.5) / f32(cinfo.width) - 1.0;
+    let ndc_y = 1.0 - 2.0 * (f32(coords.y) + 0.5) / f32(cinfo.height);
+    let p = vec3<f32>(ndc_x * d / cinfo.proj_a, ndc_y * d / cinfo.proj_b, -d);
+    let z = slice_of(d);
+    if (z < 0) {
+        return sum;
+    }
+    // Kachel mit Randklemme — gespiegeltes `ClusterGrid::locate`.
+    let tx = min(coords.x / cinfo.tile_size, cinfo.tiles_x - 1u);
+    let ty = min(coords.y / cinfo.tile_size, cinfo.tiles_y - 1u);
+    let cell = (u32(z) * cinfo.tiles_y + ty) * cinfo.tiles_x + tx;
+    let base = cell * CLUSTER_CAP;
+    let n = min(cluster_lights[base], cinfo.light_count);
+    for (var k = 1u; k <= n; k = k + 1u) {
+        let li = cluster_lights[base + k];
+        let L = plights[li].pos_range;
+        let v = L.xyz - p;
+        let dist = length(v);
+        let t = clamp(1.0 - dist / L.w, 0.0, 1.0);
+        let att = t * t;
+        if (att > 0.0) {
+            let ndl = max(dot(normal, v / max(dist, 1e-7)), 0.0);
+            let ci = plights[li].color_intensity;
+            sum = sum + ci.rgb * ci.a * att * ndl;
+        }
+    }
+    return sum;
+}
+
 @vertex
 fn vs_fullscreen(@builtin(vertex_index) vi : u32) -> @builtin(position) vec4<f32> {
     // Spannt das Viewport-Rechteck in einem Dreieck auf (Standard-Trick).
@@ -132,13 +235,14 @@ fn surface_at(coords : vec2<u32>) -> SurfaceGpu {
 
 @fragment
 fn fs_light(@builtin(position) frag : vec4<f32>) -> @location(0) vec4<f32> {
-    let s = surface_at(vec2<u32>(u32(frag.x), u32(frag.y)));
-    // Erster Beleuchtungs-Beweis: Lambert + konstanter Ambient. Die
-    // volle BRDF (Cluster-Lichter, Specular) folgt mit dem Licht-Pass.
-    // Das Ziel ist ein Float-Target: Werte ueber 1.0 ueberleben bis
-    // zum Tone-Mapping — das ist der HDR-Beweis dieser Kette.
+    let coords = vec2<u32>(u32(frag.x), u32(frag.y));
+    let s = surface_at(coords);
+    // Lambert + konstanter Ambient fuer die gerichtete Sonne, plus die
+    // geclusterten Punktlichter. Das Ziel ist ein Float-Target: Werte
+    // ueber 1.0 ueberleben bis zum Tone-Mapping — HDR-Beweis der Kette.
     let ndl = max(dot(s.normal, normalize(cam.light_dir_time.xyz)), 0.0);
-    let c = s.albedo * (0.1 + 0.9 * ndl) * post.light_intensity;
+    let sum = cluster_light_sum(coords, s.normal);
+    let c = s.albedo * (vec3<f32>(0.1 + 0.9 * ndl) + sum) * post.light_intensity;
     return vec4<f32>(c, 1.0);
 }
 

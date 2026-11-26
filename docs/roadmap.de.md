@@ -104,7 +104,14 @@ mit ehrlichem Haken-Stand. ✅ fertig und testabgedeckt · 🟡 teilweise gebaut
       RGBA32F-Ziel (Werte > 1,0 ueberleben), ein Tone-Mapping-Pass
       spiegelt die Kurven aus `re-render::hdr` in WGSL (ACES/Reinhard;
       AgX noch offen) — Pixel-Diff-verifiziert gegen `HdrPipeline::process()`
-- [ ] Geclusterte Lichter im Deferred-Lighting-Pass
+- [x] Geclusterte Punktlichter im Deferred-Lighting-Pass: der Shader
+      findet den Cluster jedes Pixels (Kachel x logarithmische
+      Tiefenscheibe, Tiefe aus dem Depth-Buffer rekonstruiert) und
+      summiert dessen Lichter — Cluster-Suche per Pixel-Diff gegen
+      `cull_lights()` auf der CPU verifiziert (das Culling selbst läuft
+      noch auf der CPU)
+- [ ] GPU-Compute-Licht-Culling (`cluster_view_aabb` +
+      `sphere_intersects_aabb` als Compute-Pass spiegeln)
 - [ ] Shadow 2.0 (kaskadiert + geclustert)
 - [ ] Upscaling-Adapter: FSR / XeSS / DLSS ([rendering.de](rendering.de.md))
 - [ ] Render-Graph: die Pass-Kette (Shadow → G-Buffer → Lighting → Post)

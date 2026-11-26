@@ -26,7 +26,10 @@ use re_render::{Camera, DrawBatch, GfxBackend, GfxError};
 
 pub mod deferred;
 
-pub use deferred::{DeferredBatch, DeferredHdr, GBufferReadback, HdrReadback};
+pub use deferred::{
+    CLUSTER_CAP, CLUSTER_SLICES, CLUSTER_TILE, DeferredBatch, DeferredHdr, DeferredLight,
+    GBufferReadback, HdrReadback,
+};
 use deferred::Deferred;
 
 const SHADER: &str = include_str!("../shader.wgsl");
@@ -587,6 +590,7 @@ impl WgpuBackend {
         camera: &Camera,
         batches: &[DeferredBatch],
         hdr: DeferredHdr,
+        lights: &[DeferredLight],
     ) -> Result<(), GfxError> {
         let inner = self
             .inner
@@ -598,7 +602,7 @@ impl WgpuBackend {
         self.deferred
             .as_mut()
             .expect("gerade erzeugt")
-            .render(inner, camera, batches, hdr)?;
+            .render(inner, camera, batches, hdr, lights)?;
         self.frames += 1;
         Ok(())
     }
@@ -628,6 +632,20 @@ impl WgpuBackend {
             .as_ref()
             .ok_or_else(|| GfxError::Device("kein Deferred-Frame gerendert".into()))?;
         d.read_hdr(inner)
+    }
+
+    /// Die Depth-Buffer des letzten Deferred-Frames als f32 — der
+    /// Test rekonstruiert damit dieselbe Sichttiefe wie der Shader.
+    pub fn read_deferred_depth(&self) -> Result<Vec<f32>, GfxError> {
+        let inner = self
+            .inner
+            .as_ref()
+            .ok_or_else(|| GfxError::Device("init nicht ausgeführt".into()))?;
+        let d = self
+            .deferred
+            .as_ref()
+            .ok_or_else(|| GfxError::Device("kein Deferred-Frame gerendert".into()))?;
+        d.read_depth(inner)
     }
 
     /// Das beleuchtete Deferred-Ergebnis als RGBA8 (Zeilen ohne

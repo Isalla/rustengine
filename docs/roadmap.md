@@ -101,7 +101,13 @@ honest state of repair. ✅ done and test-covered · 🟡 partially built ·
       RGBA32F target (values > 1.0 survive), a tone-mapping pass mirrors
       the `re-render::hdr` curves in WGSL (ACES/Reinhard; AgX pending
       its mirror) — pixel-diff verified against `HdrPipeline::process()`
-- [ ] Clustered lights in the deferred lighting pass
+- [x] Clustered point lights in the deferred lighting pass: the shader
+      finds each pixel's cluster (tile x log depth slice, depth
+      reconstructed from the depth buffer) and sums its lights —
+      cluster lookup pixel-diff verified against `cull_lights()` on the
+      CPU (culling itself still runs CPU-side)
+- [ ] GPU compute light culling (mirror `cluster_view_aabb` +
+      `sphere_intersects_aabb` in a compute pass)
 - [ ] Shadow 2.0 (cascaded + clustered)
 - [ ] Upscaling adapters: FSR / XeSS / DLSS ([rendering](rendering.md))
 - [ ] Render graph: declare the pass chain (shadow → G-buffer → lighting
