@@ -1,12 +1,16 @@
-//! Cascaded Shadow Maps — Kaskaden-Aufteilung (M5, Shadow 2.0).
+//! Cascaded Shadow Maps — Aufteilung, Light-Space-Fit und Sampling
+//! (M5, Shadow 2.0).
 //!
 //! Nahe Schatten brauchen hohe Auflösung, ferne geringe. CSM schneidet die
 //! Sichttiefe in mehrere Kaskaden und legt pro Kaskade eine eigene
 //! Shadow-Map. Dieser Kern berechnet die Tiefen-Aufteilung **und** den
 //! Light-Space-Fit pro Kaskade ([`fit_cascade`], Sphere-Fit mit
-//! Texel-Snapping) — backend-neutral und headless testbar. Der GPU-Pass
-//! muss dieselben Matrizen verwenden; die Map-Textur selbst folgt mit
-//! der Pipeline.
+//! Texel-Snapping) sowie die Schattenseite des Lighting-Passes:
+//! Kaskaden-Wahl ([`cascade_for_depth`]), Projektion in die Map
+//! ([`project_shadow`]), PCF-Box ([`pcf_box3x3`]) und Tiefen-Bias
+//! ([`depth_bias`]) — backend-neutral und headless testbar. Der GPU-Pass
+//! muss dieselbe Mathematik verwenden (PCF gegen den Depth-Compare-
+//! Sampler); die Map-Textur selbst folgt mit der Pipeline.
 //!
 //! Aufteilung nach dem verbreiteten „practical split"-Schema: eine
 //! Mischung aus logarithmischer und gleichmäßiger Verteilung.
@@ -174,6 +178,93 @@ pub fn fit_cascade(
     }
 }
 
+// ── Sampling-Kern (Kaskaden-Wahl + PCF-Referenz) ──────────────────────
+//
+// Die Schattenseite des Lighting-Passes: welcher Kaskade gehört ein
+// Punkt, wo liegt er in seiner Shadow-Map, und wie hell ist er dort?
+// Wie bei Cluster und FSR1 ist dieser Kern die Test-Referenz, die der
+// GPU-Pass Zug-fuer-Zug spiegeln muss — [`cascade_for_depth`] wird im
+// Shader zur Schleife ueber die Grenzen, [`pcf_box3x3`] zum
+// Depth-Compare-Sampler mit linearem Filter (vier Texelvergleiche pro
+// Tap, neun Taps — dieselbe Gewichtung).
+
+/// Kaskade fuer eine Sichttiefe (positiver Abstand entlang der Blick−Z).
+/// `boundaries` sind die Grenzen aus [`CascadeSetup::boundaries`];
+/// `d` gehoert zu Kaskade i, wenn `boundaries[i] <= d < boundaries[i+1]`.
+/// Vor der ersten und hinter der letzten Grenze: `None` (kein Schatten).
+pub fn cascade_for_depth(boundaries: &[f32], d: f32) -> Option<usize> {
+    let last = boundaries.len().checked_sub(1)?;
+    if d < boundaries[0] || d >= boundaries[last] {
+        return None;
+    }
+    // Lineare Suche: hochstaens fuenf Grenzen — kein Binary Search noetig.
+    for i in 0..last {
+        if d < boundaries[i + 1] {
+            return Some(i);
+        }
+    }
+    None
+}
+
+/// Welt-Punkt → (u, v, Referenz-Tiefe) in der Kaskade — dieselbe
+/// Projektion, die der Shadow-Pass mit `light_view_proj` rechnet.
+/// u/v in 0..1 (Map-Rand = Mitte des Randtexels), Tiefe in 0..1
+/// (Ortho spannt 0..2r). Ortho heißt w == 1 — keine Perspektive zu Teilern.
+pub fn project_shadow(fit: &CascadeFit, world: Vec3) -> [f32; 3] {
+    let h = fit.light_view_proj * world.extend(1.0);
+    let n = h.truncate() / h.w;
+    [(n.x + 1.0) * 0.5, (n.y + 1.0) * 0.5, n.z]
+}
+
+/// Ein PCF-Tap: Hardware-Vergleich mit bilinearen Gewichten — vier
+/// Texelvergleiche (`Texel <= Referenz` => beleuchtet), bilinear
+/// gemischt, Randklemmung wie ClampToEdge.
+fn compare_bilinear(map: &[f32], size: usize, uv: [f32; 2], reference: f32) -> f32 {
+    // Texelmittelpunkte liegen bei (i + 0.5) / size.
+    let x = uv[0] * size as f32 - 0.5;
+    let y = uv[1] * size as f32 - 0.5;
+    let (x0, y0) = (x.floor(), y.floor());
+    let (fx, fy) = (x - x0, y - y0);
+    let tap = |ix: f32, iy: f32| -> f32 {
+        let cx = (ix as i64).clamp(0, size as i64 - 1) as usize;
+        let cy = (iy as i64).clamp(0, size as i64 - 1) as usize;
+        (map[cy * size + cx] <= reference) as u8 as f32
+    };
+    let a = tap(x0, y0) * (1.0 - fx) + tap(x0 + 1.0, y0) * fx;
+    let b = tap(x0, y0 + 1.0) * (1.0 - fx) + tap(x0 + 1.0, y0 + 1.0) * fx;
+    a * (1.0 - fy) + b * fy
+}
+
+/// PCF-Box 3×3: neun bilineare Vergleichs-Taps im Texelabstand,
+/// gleichmaessig gemittelt — die CPU-Referenz fuer den
+/// Depth-Compare-Sampler der GPU. 0.0 = voll im Schatten, 1.0 = voll
+/// beleuchtet; uv darf ueber den Map-Rand hinauszeigen (Klemmung).
+pub fn pcf_box3x3(map: &[f32], size: usize, uv: [f32; 2], reference: f32) -> f32 {
+    debug_assert_eq!(map.len(), size * size);
+    if size == 0 {
+        return 1.0;
+    }
+    let t = 1.0 / size as f32;
+    let mut sum = 0.0f32;
+    for dy in -1i32..=1 {
+        for dx in -1i32..=1 {
+            let u = [uv[0] + dx as f32 * t, uv[1] + dy as f32 * t];
+            sum += compare_bilinear(map, size, u, reference);
+        }
+    }
+    (sum / 9.0).clamp(0.0, 1.0)
+}
+
+/// Tiefen-Bias aus der Flaechenorientierung: konstanter Sockel plus
+/// Neigungsanteil — streifende Flaechen brauchen mehr. `normal` und
+/// `light_dir` (Fallrichtung) normiert; rueckwaerts orientierte
+/// Normalen klemmen auf den groessten Bias. Die Normalen-Offset-
+/// Verschiebung des Welt-Punkts macht der Aufrufer (vor `project_shadow`).
+pub fn depth_bias(normal: Vec3, light_dir: Vec3, constant: f32, slope: f32) -> f32 {
+    let ndotl = normal.dot(-light_dir).clamp(0.0, 1.0);
+    constant + slope * (1.0 - ndotl)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -328,5 +419,92 @@ mod tests {
             let fit = fit_cascade((1.0, 20.0), &view, &proj, dir, 256, true);
             assert!(fit.light_view_proj.to_cols_array_2d().iter().flatten().all(|v| v.is_finite()), "NaN bei {dir:?}");
         }
+    }
+
+    // ── Sampling-Kern ──────────────────────────────────────────────────
+
+    #[test]
+    fn kaskade_wird_nach_sichttiefe_gewaehlt() {
+        let b = [0.5f32, 10.0, 40.0, 120.0];
+        assert_eq!(cascade_for_depth(&b, 0.4), None); // vor der Nahgrenze
+        assert_eq!(cascade_for_depth(&b, 0.5), Some(0)); // untere Grenze inklusiv
+        assert_eq!(cascade_for_depth(&b, 9.999), Some(0));
+        assert_eq!(cascade_for_depth(&b, 10.0), Some(1)); // Grenze -> hoehere
+        assert_eq!(cascade_for_depth(&b, 119.9), Some(2));
+        assert_eq!(cascade_for_depth(&b, 120.0), None); // hinter der Reichweite
+        assert_eq!(cascade_for_depth(&[], 5.0), None); // kein Setup
+    }
+
+    #[test]
+    fn projektion_legt_kugelmittelpunkt_auf_map_mitte() {
+        let (view, proj) = test_cam();
+        let fit =
+            fit_cascade((1.0, 40.0), &view, &proj, Vec3::new(-0.4, -1.0, -0.3), 1024, true);
+        let p = project_shadow(&fit, fit.sphere_center);
+        assert!((p[0] - 0.5).abs() < 1e-4 && (p[1] - 0.5).abs() < 1e-4, "uv {p:?}");
+        assert!((p[2] - 0.5).abs() < 1e-4, "Tiefe {}", p[2]);
+        // Kaskaden-Ecken bleiben im Map-Bereich (der Sphere-Fit ist grosszuegig).
+        for c in cascade_corners(&view, &proj, 1.0, 40.0) {
+            let q = project_shadow(&fit, c);
+            assert!(
+                q[0] >= -1e-3 && q[0] <= 1.0 + 1e-3
+                    && q[1] >= -1e-3 && q[1] <= 1.0 + 1e-3
+                    && q[2] >= -1e-3 && q[2] <= 1.0 + 1e-3,
+                "Ecke jenseits Map: {q:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn pcf_konstante_map_hart_wahr_oder_falsch() {
+        let size = 8;
+        let map = vec![0.5f32; size * size];
+        // Map tiefer als Referenz -> Vergleich wahr -> beleuchtet.
+        assert_eq!(pcf_box3x3(&map, size, [0.5, 0.5], 0.6), 1.0);
+        assert_eq!(pcf_box3x3(&map, size, [0.5, 0.5], 0.4), 0.0);
+        // Exakt gleich: `<=` zaehlt als beleuchtet (Hardware-Konvention).
+        assert_eq!(pcf_box3x3(&map, size, [0.5, 0.5], 0.5), 1.0);
+    }
+
+    #[test]
+    fn pcf_weicht_kante_und_klemmt_am_rand() {
+        let size = 8;
+        // Stufenkante: linke Haelfte tief (beleuchtet), rechte hoch (Schatten).
+        let map: Vec<f32> = (0..size * size)
+            .map(|i| if i % size < size / 2 { 0.25 } else { 0.75 })
+            .collect();
+        let reference = 0.5;
+        assert_eq!(pcf_box3x3(&map, size, [0.25, 0.5], reference), 1.0);
+        assert_eq!(pcf_box3x3(&map, size, [0.75, 0.5], reference), 0.0);
+        let mid = pcf_box3x3(&map, size, [0.5, 0.5], reference);
+        assert!(mid > 0.0 && mid < 1.0, "Kantenmittel {mid}");
+        // uv ueber den Rand hinaus: Klemmung statt Panic, Ergebnis gueltig.
+        let edge = pcf_box3x3(&map, size, [1.4, -0.3], reference);
+        assert!((0.0..=1.0).contains(&edge), "Rand-PCF {edge}");
+    }
+
+    #[test]
+    fn bias_waechst_mit_der_neigung() {
+        let dir = Vec3::new(0.0, -1.0, 0.0); // senkrecht nach unten
+        let facing = depth_bias(Vec3::Y, dir, 0.001, 0.01); // senkrecht bestrahlt
+        let grazing = depth_bias(Vec3::X, dir, 0.001, 0.01); // streifend
+        assert!(approx(facing, 0.001, 1e-6), "facing {facing}");
+        assert!(approx(grazing, 0.011, 1e-6), "grazing {grazing}");
+        assert!(facing < grazing);
+        // Rueckwaerts orientierte Normale: geklemmt, kein NaN.
+        let back = depth_bias(Vec3::NEG_Y, dir, 0.001, 0.01);
+        assert!(approx(back, 0.011, 1e-6) && back.is_finite());
+    }
+
+    #[test]
+    fn pcf_deterministisch_und_normiert() {
+        let size = 16;
+        // Pseudo-zufaellige, aber feste Map (kein RNG — kein Gluecksspiel).
+        let map: Vec<f32> =
+            (0..size * size).map(|i| ((i * 2654435761) % 97) as f32 / 96.0).collect();
+        let a = pcf_box3x3(&map, size, [0.31, 0.77], 0.5);
+        let b = pcf_box3x3(&map, size, [0.31, 0.77], 0.5);
+        assert_eq!(a, b, "zwei Laeufe müssen bitidentisch sein");
+        assert!((0.0..=1.0).contains(&a), "PCF-Wert {a}");
     }
 }

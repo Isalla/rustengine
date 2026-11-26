@@ -70,5 +70,8 @@ pub use hdr::{
     srgb_to_linear, AdaptiveExposure, HdrPipeline, ToneCurve, MIDDLE_GRAY,
 };
 pub use jitter::{halton, JitterPattern};
-pub use shadow::{fit_cascade, CascadeFit, CascadeSetup};
+pub use shadow::{
+    cascade_for_depth, depth_bias, fit_cascade, pcf_box3x3, project_shadow, CascadeFit,
+    CascadeSetup,
+};
 pub use temporal::{History, RgbBox, Taa};
