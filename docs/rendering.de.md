@@ -86,7 +86,13 @@ unten immer spielbar — auch im Browser.
     der Ground Truth. Die konkreten Zahlen setzt die erste
     Implementierung, sie bleiben in dieser Datei stehen.
 * **Upscaling-Adapter (`re-upscale`)** — Trait, Backends als Module:
-  * `Nis`/`Easu`-artiger räumlicher Upscaler (überall, Pflicht-Fallback)
+  * **FSR 1 (EASU + RCAS) — umgesetzt** (M5): CPU-Kern `re_render::fsr`
+    (Port von AMD `ffx_fsr1.h`, MIT) + WGSL-Spiegelung in der
+    Deferred-Kette hinter dem Tone-Mapping. Pi-Pfad: intern mit
+    1/Skala rendern, EASU + RCAS aufs Display, 8-Bit-Zwischenpuffer
+    wie bei AMD. Die WGSL spiegelt den CPU-Kern Zug-fuer-Zug
+    (Pixel-Diff-Tor); das Qualitaetstor verlangt, dass FSR1 im MAE
+    gegen den nativen Frame Bilinear schlaegt.
   * **FSR 2/3** (zeitlich + Frame Generation): AMD liefert MIT-lizenzierte
     Shader; Port nach WGSL für alle Plattformen, natives Timing auf
     Desktop.

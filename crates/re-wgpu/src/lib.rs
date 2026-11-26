@@ -28,7 +28,7 @@ pub mod deferred;
 
 pub use deferred::{
     CLUSTER_CAP, CLUSTER_SLICES, CLUSTER_TILE, DeferredBatch, DeferredHdr, DeferredLight,
-    GBufferReadback, HdrReadback,
+    DeferredUpscale, GBufferReadback, HdrReadback,
 };
 use deferred::Deferred;
 
@@ -622,22 +622,30 @@ impl WgpuBackend {
 
     // ---------- Deferred (M5) ----------
 
-    /// Ein Deferred-Frame: Geometrie-Pass (MRT-G-Buffer) → Lighting-Pass.
-    /// Das Ergebnis liegt im Farb-Ziel — `readback_rgba()` liefert es wie
-    /// im Forward-Pfad. Nur headless sinnvoll (Readback-Proof).
+    /// Ein Deferred-Frame: Geometrie-Pass (MRT-G-Buffer) → Lighting-Pass
+    /// → Tone-Mapping → optional FSR1-Upscale (M5, Box 3: intern mit
+    /// 1/`upscale.scale` rendern, EASU + RCAS aufs Display). Das Ergebnis
+    /// liegt im Farb-Ziel — `read_deferred_rgba()` liefert es in
+    /// Display-Groesse. Nur headless sinnvoll (Readback-Proof).
     pub fn render_deferred(
         &mut self,
         camera: &Camera,
         batches: &[DeferredBatch],
         hdr: DeferredHdr,
         lights: &[DeferredLight],
+        upscale: Option<DeferredUpscale>,
     ) -> Result<(), GfxError> {
         let inner = self
             .inner
             .as_mut()
             .ok_or_else(|| GfxError::Device("init nicht ausgeführt".into()))?;
-        if self.deferred.is_none() {
-            self.deferred = Some(Deferred::new(inner));
+        // Neue Upscale-Einstellung => andere Ziel-Groessen => neu bauen.
+        let stale = match &self.deferred {
+            Some(d) => d.upscale() != upscale,
+            None => true,
+        };
+        if stale {
+            self.deferred = Some(Deferred::new(inner, upscale));
         }
         self.deferred
             .as_mut()
@@ -702,9 +710,10 @@ impl WgpuBackend {
         d.read_cluster_lights(inner)
     }
 
-    /// Das beleuchtete Deferred-Ergebnis als RGBA8 (Zeilen ohne
-    /// Copy-Padding) — Seitenarm zu `readback_rgba()` für den
-    /// Forward-Pfad. Größe kommt aus den Deferred-Targets.
+    /// Das beleuchtete Deferred-Endergebnis als RGBA8 (Zeilen ohne
+    /// Copy-Padding) — bei Upscale das FSR1-Bild in Display-Groesse,
+    /// sonst das tone-gemappte interne Ziel. Seitenarm zu
+    /// `readback_rgba()` für den Forward-Pfad.
     pub fn read_deferred_rgba(&self) -> Result<(u32, u32, Vec<u8>), GfxError> {
         let inner = self
             .inner
@@ -716,6 +725,21 @@ impl WgpuBackend {
             .ok_or_else(|| GfxError::Device("kein Deferred-Frame gerendert".into()))?;
         let (w, h) = inner.size;
         Ok((w.max(1), h.max(1), d.read_final(inner)?))
+    }
+
+    /// Das tone-gemappte interne Ziel in interner Groesse — bei Upscale
+    /// die display-kodierte Eingabe der FSR1-Kette (CPU-Referenz-Beweis).
+    pub fn read_deferred_internal(&self) -> Result<(u32, u32, Vec<u8>), GfxError> {
+        let inner = self
+            .inner
+            .as_ref()
+            .ok_or_else(|| GfxError::Device("init nicht ausgeführt".into()))?;
+        let d = self
+            .deferred
+            .as_ref()
+            .ok_or_else(|| GfxError::Device("kein Deferred-Frame gerendert".into()))?;
+        let (w, h) = d.internal_size();
+        Ok((w, h, d.read_internal(inner)?))
     }
 
     /// Sichtbeleg: das beleuchtete Deferred-Ergebnis als PNG.

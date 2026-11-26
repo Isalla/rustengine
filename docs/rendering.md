@@ -81,7 +81,13 @@ playable — even in the browser.
     truth. The concrete numbers are set by the first implementation
     and stay in this file.
 * **Upscaling adapter (`re-upscale`)** — trait, backends as modules:
-  * `Nis`/`Easu`-style spatial upscaler (everywhere, required fallback)
+  * **FSR 1 (EASU + RCAS) — implemented** (M5): CPU core
+    `re_render::fsr` (port of AMD `ffx_fsr1.h`, MIT) + WGSL mirror in
+    the deferred chain behind the tone map. Pi-tier path: internal
+    1/scale render, EASU + RCAS to display, 8-bit intermediate exactly
+    like AMD's. The WGSL mirrors the CPU core tap-for-tap (pixel-diff
+    gate); the quality gate requires FSR1's MAE against the native
+    frame to beat bilinear.
   * **FSR 2/3** (temporal + frame generation): AMD ships MIT-licensed
     shaders; ported to WGSL for all platforms, native timing on desktop.
   * **FSR 4 / „Redstone"** (ML super resolution, ray regeneration, frame

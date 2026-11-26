@@ -112,7 +112,13 @@ honest state of repair. ✅ done and test-covered · 🟡 partially built ·
       `cull_lights()` on the CPU across every cluster (the CPU core
       remains the test reference)
 - [ ] Shadow 2.0 (cascaded + clustered)
-- [ ] Upscaling adapters: FSR / XeSS / DLSS ([rendering](rendering.md))
+- [x] Upscaling adapter FSR1 (EASU + RCAS) behind the deferred chain's
+      tone map — the Pi-tier path (M13): render internally at 1/scale,
+      upscale to display. The WGSL mirrors `re_render::fsr` (port of
+      AMD `ffx_fsr1.h`, MIT) tap-for-tap, pixel-diff verified, and the
+      quality gate proves FSR1 beats bilinear against the native frame
+- [ ] Desktop-tier adapters: FSR2/3 (temporal), XeSS, DLSS
+      ([rendering](rendering.md))
 - [ ] Render graph: declare the pass chain (shadow → G-buffer → lighting
       → post) once; the graph schedules it and manages texture
       transitions/aliasing over the backend traits

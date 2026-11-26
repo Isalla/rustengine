@@ -41,6 +41,7 @@ pub mod billboard;
 pub mod camera;
 pub mod cluster;
 pub mod cull;
+pub mod fsr;
 pub mod graph;
 pub mod gbuffer;
 pub mod hdr;
@@ -55,6 +56,7 @@ pub use cluster::{
     cluster_view_aabb, cull_lights, log_z_bounds, sphere_intersects_aabb, ClusterGrid, SphereLight,
 };
 pub use cull::{Frustum, HiZPyramid, Plane};
+pub use fsr::{easu, fsr1, rcas};
 pub use graph::{
     Access, AccessKind, CompiledGraph, GraphError, Layout, PassDesc, RenderGraph, ResourceSpan,
 };

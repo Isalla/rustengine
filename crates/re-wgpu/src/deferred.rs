@@ -170,6 +170,32 @@ struct LightGpu {
     color_intensity: [f32; 4],
 }
 
+/// Upscale-Stufe hinter dem Tone-Mapping (M5, Box 3 / M13-Pi-Profil):
+/// intern mit 1/`scale` rendern, dann FSR1 (EASU + RCAS) aufs Display.
+/// `scale` ist ganzzahlig (2 = halbe interne Auflösung), wie es die
+/// Pi-Formel der M13-Doktrin vorsieht.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DeferredUpscale {
+    /// Ganzzahliger Skala-Faktor interner Render-Pixel pro Display-Pixel.
+    pub scale: u32,
+    /// RCAS-Schärfe in AMD-Blenden (0 = schärfste, 2 = typisch weich).
+    pub sharpness_stops: f32,
+}
+
+/// WGSL-Seite von `struct FsrCon` (EASU-Konstanten + RCAS-Blende,
+/// FsrEasuCon/FsrRcasCon in einem Upload): sk = interne/display Größe,
+/// ofs = 0.5*sk − 0.5 (`ofs`, weil `of` in WGSL reserviert ist),
+/// sharp = 2^-stops. Dieselben Werte nutzt die CPU-Referenz in
+/// `re_render::fsr` — bitidentisch.
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct FsrCon {
+    sk: [f32; 2],
+    ofs: [f32; 2],
+    sharp: f32,
+    _pad: f32,
+}
+
 /// Roh-Inhalt des HDR-Float-Targets (RGBA32F) nach einem Frame.
 /// 16 Byte/Pixel; der Beweis, dass Werte ueber 1.0 die Kette
 /// durchlaufen — ein 8-Bit-Ziel koennte das nicht.
@@ -282,11 +308,33 @@ pub(crate) struct Deferred {
     pipe_geometry: wgpu::RenderPipeline,
     pipe_light: wgpu::RenderPipeline,
     pipe_tonemap: wgpu::RenderPipeline,
+    /// FSR1 (Box 3): Layout, Pipelines und — nur bei Upscale — die
+    /// Display-Ziele (EASU-Zwischenablage, RCAS-Endbild) samt Bindings.
+    /// Das Layout haellt die Bind-Groups nicht lesbar, aber wgpu
+    /// verlangt ihr Weiterleben bis zum letzten Submit — Halter unten.
+    #[allow(dead_code)] // naehrt fsr_bind und rcas_bind
+    g_fsr: wgpu::BindGroupLayout,
+    pipe_fsr: wgpu::RenderPipeline,
+    pipe_rcas: wgpu::RenderPipeline,
+    #[allow(dead_code)] // dito: easu_tex naehrt easu_view
+    easu_tex: Option<wgpu::Texture>,
+    #[allow(dead_code)] // naehrt rcas_bind
+    easu_view: Option<wgpu::TextureView>,
+    #[allow(dead_code)] // rcas_view ist das Display-Endergebnis
+    rcas_tex: Option<wgpu::Texture>,
+    rcas_view: Option<wgpu::TextureView>,
+    fsr_bind: Option<wgpu::BindGroup>,
+    rcas_bind: Option<wgpu::BindGroup>,
+    /// Upscale-Einstellung, fuer die diese Zustaende gebaut wurden.
+    upscale: Option<DeferredUpscale>,
+    /// Display-Groesse (RCAS-Ziel); `size` ist die interne Groesse.
+    display: (u32, u32),
+    /// Interne Ziel-Groesse (bei Upscale = display / scale).
     size: (u32, u32),
 }
 
 impl Deferred {
-    pub(crate) fn new(inner: &Inner) -> Self {
+    pub(crate) fn new(inner: &Inner, upscale: Option<DeferredUpscale>) -> Self {
         let device = &inner.device;
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("re-deferred"),
@@ -485,12 +533,18 @@ impl Deferred {
         });
 
         let (w, h) = inner.size;
-        let gb0 = Self::tex_rgba8(device, w, h, "gb0");
-        let gb1 = Self::tex_rgba8(device, w, h, "gb1");
-        let gb2 = Self::tex_rg16f(device, w, h, "gb2");
+        // Pi-Formel (M13): intern mit 1/scale rendern, FSR1 füllt danach
+        // das Display-Ziel. Ohne Upscale sind beide Größen gleich.
+        let (iw, ih) = match upscale {
+            Some(u) => ((w / u.scale.max(1)).max(1), (h / u.scale.max(1)).max(1)),
+            None => (w, h),
+        };
+        let gb0 = Self::tex_rgba8(device, iw, ih, "gb0");
+        let gb1 = Self::tex_rgba8(device, iw, ih, "gb1");
+        let gb2 = Self::tex_rg16f(device, iw, ih, "gb2");
         let depth = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("d-depth"),
-            size: wgpu::Extent3d { width: w.max(1), height: h.max(1), depth_or_array_layers: 1 },
+            size: wgpu::Extent3d { width: iw.max(1), height: ih.max(1), depth_or_array_layers: 1 },
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
@@ -504,16 +558,21 @@ impl Deferred {
             view_formats: &[],
         });
         // Ziel des Tone-Mapping-Passes: sRGB wie der Forward-Offscreen-
-        // Pfad, damit read_deferred_rgba() das Endergebnis liefert.
+        // Pfad, damit read_deferred_rgba() das Endergebnis liefert. Bei
+        // Upscale naehrt es zusaetzlich den EASU-Pass — AMD verlangt
+        // display-kodierte Eingabe, also die rohen (sRGB-dekodierten)
+        // Bytes ueber eine Rgba8Unorm-Rohansicht (view_formats).
         let final_tex = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("d-final"),
-            size: wgpu::Extent3d { width: w.max(1), height: h.max(1), depth_or_array_layers: 1 },
+            size: wgpu::Extent3d { width: iw.max(1), height: ih.max(1), depth_or_array_layers: 1 },
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: wgpu::TextureFormat::Rgba8UnormSrgb,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
-            view_formats: &[],
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                | wgpu::TextureUsages::COPY_SRC
+                | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[wgpu::TextureFormat::Rgba8Unorm],
         });
         // HDR-Ziel des Lighting-Passes: RGBA32F statt RGBA16F, weil
         // wgpu das Sampeln von 16F-Targets die instabile f16-Feature
@@ -522,7 +581,7 @@ impl Deferred {
         // auf 16F wechseln (Format ist eine Profil-Entscheidung, M13).
         let hdr = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("d-hdr"),
-            size: wgpu::Extent3d { width: w.max(1), height: h.max(1), depth_or_array_layers: 1 },
+            size: wgpu::Extent3d { width: iw.max(1), height: ih.max(1), depth_or_array_layers: 1 },
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
@@ -544,7 +603,7 @@ impl Deferred {
         // wachsen bei Bedarf ( lights_cap ). Groessen hier minimal —
         // render() schreibt nur so viel, wie die Frame-Lichter fuellen.
         let cluster_count =
-            w.max(1).div_ceil(CLUSTER_TILE) * h.max(1).div_ceil(CLUSTER_TILE) * CLUSTER_SLICES;
+            iw.max(1).div_ceil(CLUSTER_TILE) * ih.max(1).div_ceil(CLUSTER_TILE) * CLUSTER_SLICES;
         let cluster_uni_buf = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("d-cluster-uni"),
             size: std::mem::size_of::<ClusterUni>() as u64,
@@ -572,6 +631,99 @@ impl Deferred {
                 wgpu::BindGroupEntry { binding: 1, resource: post_buf.as_entire_binding() },
             ],
         });
+
+        // ── FSR1 (M5, Box 3) ───────────────────────────────────────────
+        // EASU und RCAS hängen hinters Tone-Mapping; beide lesen per
+        // textureLoad (nicht gefiltert) und brauchen je ein Uniform.
+        let fsr_tex_entry = wgpu::BindGroupLayoutEntry {
+            binding: 0,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Texture {
+                sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                view_dimension: wgpu::TextureViewDimension::D2,
+                multisampled: false,
+            },
+            count: None,
+        };
+        let fsr_uni_entry = wgpu::BindGroupLayoutEntry {
+            binding: 1,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Uniform,
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            },
+            count: None,
+        };
+        let g_fsr = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("d-g-fsr"),
+            entries: &[fsr_tex_entry, fsr_uni_entry],
+        });
+        // Die Display-Ziele und Bindings entstehen nur bei Upscale —
+        // ohne Skala gibt es keine Kette (final_tex ist das Endergebnis).
+        // EASU und RCAS teilen sich Layout und Uniform (max_bind_groups=4):
+        // die Bind-Groups unterscheiden sich nur in der Quelle an binding 0.
+        let (easu_tex, easu_view, rcas_tex, rcas_view, fsr_bind, rcas_bind) =
+            if let Some(u) = upscale {
+                let con = device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("d-fsr-con"),
+                    size: std::mem::size_of::<FsrCon>() as u64,
+                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                });
+                let sk = [iw as f32 / w.max(1) as f32, ih as f32 / h.max(1) as f32];
+                // FsrEasuCon + FsrRcasCon in einem Upload — die Blende
+                // -> linear-Zahl ist dieselbe wie in der CPU-Referenz.
+                inner.queue.write_buffer(&con, 0, pod_bytes(&FsrCon {
+                    sk,
+                    ofs: [0.5 * sk[0] - 0.5, 0.5 * sk[1] - 0.5],
+                    sharp: (-u.sharpness_stops).exp2(),
+                    _pad: 0.0,
+                }));
+                let mk = |label: &str| {
+                    let t = device.create_texture(&wgpu::TextureDescriptor {
+                        label: Some(label),
+                        size: wgpu::Extent3d { width: w.max(1), height: h.max(1), depth_or_array_layers: 1 },
+                        mip_level_count: 1,
+                        sample_count: 1,
+                        dimension: wgpu::TextureDimension::D2,
+                        format: wgpu::TextureFormat::Rgba8Unorm,
+                        usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                            | wgpu::TextureUsages::TEXTURE_BINDING
+                            | wgpu::TextureUsages::COPY_SRC,
+                        view_formats: &[],
+                    });
+                    let v = t.create_view(&wgpu::TextureViewDescriptor::default());
+                    (t, v)
+                };
+                let (easu_tex, easu_view) = mk("d-easu");
+                let (rcas_tex, rcas_view) = mk("d-rcas");
+                // EASU liest das interne Ziel als ROH-Bytes-Ansicht: die
+                // sRGB-Kurve bleibt stehen, die AMD-Kette verlangt sie.
+                let final_raw = final_tex.create_view(&wgpu::TextureViewDescriptor {
+                    format: Some(wgpu::TextureFormat::Rgba8Unorm),
+                    ..Default::default()
+                });
+                let fsr_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("d-fsr-bind"),
+                    layout: &g_fsr,
+                    entries: &[
+                        wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&final_raw) },
+                        wgpu::BindGroupEntry { binding: 1, resource: con.as_entire_binding() },
+                    ],
+                });
+                let rcas_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("d-rcas-bind"),
+                    layout: &g_fsr,
+                    entries: &[
+                        wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&easu_view) },
+                        wgpu::BindGroupEntry { binding: 1, resource: con.as_entire_binding() },
+                    ],
+                });
+                (Some(easu_tex), Some(easu_view), Some(rcas_tex), Some(rcas_view), Some(fsr_bind), Some(rcas_bind))
+            } else {
+                (None, None, None, None, None, None)
+            };
 
         let layout_geo = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("d-layout-geo"),
@@ -712,6 +864,75 @@ impl Deferred {
             cache: None,
         });
 
+        // FSR1-Pipelines: Vollbild-Dreiecke, ein Ziel, kein Blend —
+        // dieselbe Bauform wie der Tone-Mapping-Pass.
+        let layout_fsr = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("d-layout-fsr"),
+            bind_group_layouts: &[Some(&g_fsr)],
+            immediate_size: 0,
+        });
+        let pipe_fsr = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("d-easu"),
+            layout: Some(&layout_fsr),
+            vertex: wgpu::VertexState {
+                module: &module,
+                entry_point: Some("vs_fullscreen"),
+                compilation_options: Default::default(),
+                buffers: &[],
+            },
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                ..Default::default()
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            fragment: Some(wgpu::FragmentState {
+                module: &module,
+                entry_point: Some("fs_easu"),
+                compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: wgpu::TextureFormat::Rgba8Unorm,
+                    blend: None,
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            multiview_mask: None,
+            cache: None,
+        });
+        let layout_rcas = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("d-layout-rcas"),
+            bind_group_layouts: &[Some(&g_fsr)],
+            immediate_size: 0,
+        });
+        let pipe_rcas = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("d-rcas"),
+            layout: Some(&layout_rcas),
+            vertex: wgpu::VertexState {
+                module: &module,
+                entry_point: Some("vs_fullscreen"),
+                compilation_options: Default::default(),
+                buffers: &[],
+            },
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                ..Default::default()
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            fragment: Some(wgpu::FragmentState {
+                module: &module,
+                entry_point: Some("fs_rcas"),
+                compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: wgpu::TextureFormat::Rgba8Unorm,
+                    blend: None,
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            multiview_mask: None,
+            cache: None,
+        });
+
         Self {
             cam_buf,
             cam_bind,
@@ -741,7 +962,18 @@ impl Deferred {
             pipe_geometry,
             pipe_light,
             pipe_tonemap,
-            size: (w.max(1), h.max(1)),
+            g_fsr,
+            pipe_fsr,
+            pipe_rcas,
+            easu_tex,
+            easu_view,
+            rcas_tex,
+            rcas_view,
+            fsr_bind,
+            rcas_bind,
+            upscale,
+            display: (w.max(1), h.max(1)),
+            size: (iw.max(1), ih.max(1)),
         }
     }
 
@@ -775,8 +1007,9 @@ impl Deferred {
     }
 
     /// Ein Frame: Geometrie-Pass (MRT) → Lighting-Pass (→ HDR-Float,
-    /// inkl. geclusterter Punktlichter) → Tone-Mapping (→ `final_tex`).
-    /// Ruft vorher `resize` auf, wenn die Größe wechselt.
+    /// inkl. geclusterter Punktlichter) → Tone-Mapping (→ `final_tex`)
+    /// → FSR1 bei Upscale (EASU + RCAS → `rcas_tex`).
+    /// Ruft vorher `resize` auf, wenn die Display-Größe wechselt.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn render(
         &mut self,
@@ -786,7 +1019,7 @@ impl Deferred {
         hdr: DeferredHdr,
         lights: &[DeferredLight],
     ) -> Result<(), GfxError> {
-        if self.size != inner.size {
+        if self.display != inner.size {
             self.resize(inner);
         }
         let post = hdr.to_uni()?;
@@ -1033,13 +1266,69 @@ impl Deferred {
             pass.set_bind_group(0, &self.post_bind, &[]);
             pass.draw(0..3, 0..1);
         }
+        // FSR1-Kette (nur bei Upscale): EASU skaliert das interne Ziel
+        // aufs Display, RCAS schaerft nach — der Pi-Pfad (M13). Beide
+        // Passes lesen display-kodierte 8-Bit-Werte, wie AMD es verlangt.
+        if self.upscale.is_some() {
+            {
+                let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("d-easu"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: self.easu_view.as_ref().expect("upscale => easu_view"),
+                        depth_slice: None,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: None,
+                    ..Default::default()
+                });
+                pass.set_pipeline(&self.pipe_fsr);
+                pass.set_bind_group(0, self.fsr_bind.as_ref().expect("upscale => fsr_bind"), &[]);
+                pass.draw(0..3, 0..1);
+            }
+            {
+                let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("d-rcas"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: self.rcas_view.as_ref().expect("upscale => rcas_view"),
+                        depth_slice: None,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: None,
+                    ..Default::default()
+                });
+                pass.set_pipeline(&self.pipe_rcas);
+                pass.set_bind_group(0, self.rcas_bind.as_ref().expect("upscale => rcas_bind"), &[]);
+                pass.draw(0..3, 0..1);
+            }
+        }
         queue.submit([enc.finish()]);
         Ok(())
     }
 
-    /// Das beleuchtete Endergebnis (`final_tex`) als RGBA8-Bytes — der
+    /// Das beleuchtete Endergebnis als RGBA8-Bytes — bei Upscale der
+    /// RCAS-Ausgang in Display-Groesse, sonst `final_tex`. Der
     /// Deferred-Seitenarm zum Forward-`readback_rgba`.
     pub(crate) fn read_final(&self, inner: &Inner) -> Result<Vec<u8>, GfxError> {
+        if let Some(tex) = &self.rcas_tex {
+            let (w, h) = self.display;
+            return crate::readback_texture(&inner.device, &inner.queue, tex, w, h, 4);
+        }
+        let (w, h) = self.size;
+        crate::readback_texture(&inner.device, &inner.queue, &self.final_tex, w, h, 4)
+    }
+
+    /// Das tone-gemappte interne Ziel (`final_tex`) in interner Groesse —
+    /// bei Upscale die display-kodierte Eingabe der FSR1-Kette, gegen
+    /// die der CPU-Referenztest antritt.
+    pub(crate) fn read_internal(&self, inner: &Inner) -> Result<Vec<u8>, GfxError> {
         let (w, h) = self.size;
         crate::readback_texture(&inner.device, &inner.queue, &self.final_tex, w, h, 4)
     }
@@ -1162,6 +1451,18 @@ impl Deferred {
     /// Groessenwechsel: alle Targets und abgeleiteten Views/Bind-Groups
     /// neu anlegen. Die neue Größe kommt aus `inner.size`.
     fn resize(&mut self, inner: &mut Inner) {
-        *self = Self::new(inner);
+        let upscale = self.upscale;
+        *self = Self::new(inner, upscale);
+    }
+
+    /// Die Upscale-Einstellung, fuer die diese Zustaende gebaut wurden —
+    /// das Backend vergleicht sie gegen den Wunsch des Aufrufers.
+    pub(crate) fn upscale(&self) -> Option<DeferredUpscale> {
+        self.upscale
+    }
+
+    /// Interne Ziel-Groesse (bei Upscale = Display / Skala).
+    pub(crate) fn internal_size(&self) -> (u32, u32) {
+        self.size
     }
 }

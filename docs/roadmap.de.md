@@ -115,7 +115,14 @@ mit ehrlichem Haken-Stand. ✅ fertig und testabgedeckt · 🟡 teilweise gebaut
       auf der CPU verifiziert, ueber alle Cluster (der CPU-Kern bleibt
       die Referenz im Test)
 - [ ] Shadow 2.0 (kaskadiert + geclustert)
-- [ ] Upscaling-Adapter: FSR / XeSS / DLSS ([rendering.de](rendering.de.md))
+- [x] Upscaling-Adapter FSR1 (EASU + RCAS) hinter dem Tone-Mapping der
+      Deferred-Kette — der Pi-Pfad (M13): intern mit 1/Skala rendern,
+      aufs Display hochskalieren. Die WGSL spiegelt `re_render::fsr`
+      (Port von AMD `ffx_fsr1.h`, MIT) Zug-fuer-Zug, Pixel-Diff-
+      verifiziert, und das Qualitaetstor beweist: FSR1 schlaegt Bilinear
+      gegen den nativen Frame
+- [ ] Desktop-Tier-Adapter: FSR2/3 (zeitlich), XeSS, DLSS
+      ([rendering.de](rendering.de.md))
 - [ ] Render-Graph: die Pass-Kette (Shadow → G-Buffer → Lighting → Post)
       einmal deklarieren; der Graph plant sie und verwaltet
       Textur-Übergänge/Aliasing über die Backend-Traits

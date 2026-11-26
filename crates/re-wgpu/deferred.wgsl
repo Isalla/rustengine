@@ -373,3 +373,203 @@ fn cs_cull(@builtin(global_invocation_id) gid : vec3<u32>) {
     }
     cluster_out[base] = min(n, CLUSTER_CAP - 1u);
 }
+
+// ── FSR1 (M5, Box 3): EASU + RCAS ──────────────────────────────────────
+// Zug-fuer-Zug-Spiegelung von re-render/src/fsr.rs — AMD FidelityFX
+// Super Resolution 1.0, Non-Packed 32-Bit (ffx_fsr1.h, MIT). AMDs
+// Naeherungs-Instruktionen (rcp/rsqrt) sind auf beiden Seiten durch
+// exakte Division ersetzt, die NaN-Pfade der flachen Gebiete durch
+// dieselben Epsilon-Klemmen — CPU und GPU rechnen bitidentisch.
+// Eingabe ist display-kodiert (Tonemap + sRGB), wie bei AMD Pflicht.
+
+// Gruppe 0, Bindung 0/1 — dieselbe Konvention wie der Tone-Mapping-Pass:
+// jede Pipeline traegt ihr eigenes Layout an Position 0 (die
+// Modul-Deklarationen teilen sich die Nummern, die Bind-Groups trennen sie).
+@group(0) @binding(0) var up_src: texture_2d<f32>;
+@group(0) @binding(1) var<uniform> fsr_con: FsrCon;
+
+/// EASU-Konstanten (FsrEasuCon): sk = sw/dw, sh/dh; ofs = 0.5*sk - 0.5;
+/// sharp = FsrRcasCon (Blende -> linear). Ein Uniform fuer beide Passes —
+/// das haelt die Gruppe-3-Layouts identisch (max_bind_groups=4).
+/// (`ofs` statt `of` — das ist in WGSL ein reserviertes Wort.)
+struct FsrCon {
+    sk: vec2<f32>,
+    ofs: vec2<f32>,
+    sharp: f32,
+    pad: f32,
+};
+
+/// Luma mal 2 — AMDs Mehrkanal-Naeherung in derselben Klammereihenfolge.
+fn fsr_luma2(c: vec3<f32>) -> f32 {
+    return c.b * 0.5 + (c.r * 0.5 + c.g);
+}
+
+/// Gespiegeltes FsrEasuSetF: Richtung/Laenge eines Quadranten.
+fn easu_set(dir: ptr<function, vec2<f32>>, len: ptr<function, f32>,
+            w: f32, lA: f32, lB: f32, lC: f32, lD: f32, lE: f32) {
+    var lenX: f32 = abs(lD - lC);
+    lenX = max(lenX, abs(lC - lB));
+    lenX = 1.0 / max(lenX, 1e-30);
+    let dirX: f32 = lD - lB;
+    (*dir).x = (*dir).x + dirX * w;
+    lenX = clamp(abs(dirX) * lenX, 0.0, 1.0);
+    lenX = lenX * lenX;
+    (*len) = (*len) + lenX * w;
+    var lenY: f32 = abs(lE - lC);
+    lenY = max(lenY, abs(lC - lA));
+    lenY = 1.0 / max(lenY, 1e-30);
+    let dirY: f32 = lE - lA;
+    (*dir).y = (*dir).y + dirY * w;
+    lenY = clamp(abs(dirY) * lenY, 0.0, 1.0);
+    lenY = lenY * lenY;
+    (*len) = (*len) + lenY * w;
+}
+
+/// Gespiegeltes FsrEasuTapF: modifizierte Lanczos-2-Naeherung,
+/// anisotrop gedreht/gestreckt (ohne sin/rcp/sqrt — reine Polynome).
+fn easu_tap(aC: ptr<function, vec3<f32>>, aW: ptr<function, f32>,
+            off: vec2<f32>, pp: vec2<f32>, dir: vec2<f32>, len2: vec2<f32>,
+            lob: f32, clp: f32, c: vec3<f32>) {
+    let ox: f32 = off.x - pp.x;
+    let oy: f32 = off.y - pp.y;
+    let vx: f32 = (ox * dir.x + oy * dir.y) * len2.x;
+    let vy: f32 = (ox * (-dir.y) + oy * dir.x) * len2.y;
+    let d2: f32 = min(vx * vx + vy * vy, clp);
+    var wB: f32 = (2.0 / 5.0) * d2 + (-1.0);
+    var wA: f32 = lob * d2 + (-1.0);
+    wB = wB * wB;
+    wA = wA * wA;
+    wB = (25.0 / 16.0) * wB + (-(25.0 / 16.0 - 1.0));
+    let w: f32 = wB * wA;
+    (*aC) = (*aC) + c * w;
+    (*aW) = (*aW) + w;
+}
+
+/// Tap-Laderand wie ein Clamp-Sampler (CPU: dieselbe Klemme).
+fn fsr_load(f: vec2<i32>, ox: i32, oy: i32, grenze: vec2<i32>) -> vec3<f32> {
+    let tc = clamp(f + vec2<i32>(ox, oy), vec2<i32>(0, 0), grenze);
+    return textureLoad(up_src, tc, 0).rgb;
+}
+
+@fragment
+fn fs_easu(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
+    let sz = textureDimensions(up_src);
+    let grenze = vec2<i32>(i32(sz.x) - 1, i32(sz.y) - 1);
+    // Position von 'f'; pp ist der gebrochene Rest in der f-Zelle.
+    // Achtung: frag.xy ist der PixelMITTELPUNKT (dx+0.5) — die Kette
+    // rechnet wie die CPU-Referenz mit dem ganzzahligen Pixelindex.
+    let pix = vec2<f32>(floor(frag.x), floor(frag.y));
+    var pp = vec2<f32>(pix.x * fsr_con.sk.x + fsr_con.ofs.x,
+                       pix.y * fsr_con.sk.y + fsr_con.ofs.y);
+    let fp = vec2<f32>(floor(pp.x), floor(pp.y));
+    pp = pp - fp;
+    let f = vec2<i32>(i32(fp.x), i32(fp.y));
+    // 12-Tap-Kernel relativ zu f (b c / e f g h / i j k l / n o).
+    let b = fsr_load(f, 0, -1, grenze);
+    let c = fsr_load(f, 1, -1, grenze);
+    let e = fsr_load(f, -1, 0, grenze);
+    let fc = fsr_load(f, 0, 0, grenze);
+    let g = fsr_load(f, 1, 0, grenze);
+    let h = fsr_load(f, 2, 0, grenze);
+    let i = fsr_load(f, -1, 1, grenze);
+    let j = fsr_load(f, 0, 1, grenze);
+    let k = fsr_load(f, 1, 1, grenze);
+    let l = fsr_load(f, 2, 1, grenze);
+    let n = fsr_load(f, 0, 2, grenze);
+    let o = fsr_load(f, 1, 2, grenze);
+    let bL = fsr_luma2(b);
+    let cL = fsr_luma2(c);
+    let eL = fsr_luma2(e);
+    let fL = fsr_luma2(fc);
+    let gL = fsr_luma2(g);
+    let hL = fsr_luma2(h);
+    let iL = fsr_luma2(i);
+    let jL = fsr_luma2(j);
+    let kL = fsr_luma2(k);
+    let lL = fsr_luma2(l);
+    let nL = fsr_luma2(n);
+    let oL = fsr_luma2(o);
+
+    // Richtung und Laenge ueber die vier Bilinear-Quadranten.
+    var dir = vec2<f32>(0.0, 0.0);
+    var len: f32 = 0.0;
+    easu_set(&dir, &len, (1.0 - pp.x) * (1.0 - pp.y), bL, eL, fL, gL, jL);
+    easu_set(&dir, &len, pp.x * (1.0 - pp.y), cL, fL, gL, hL, kL);
+    easu_set(&dir, &len, (1.0 - pp.x) * pp.y, fL, iL, jL, kL, nL);
+    easu_set(&dir, &len, pp.x * pp.y, gL, jL, kL, lL, oL);
+
+    // Richtung normalisieren (Nullfall -> horizontal), Laenge 0..1 quadrieren.
+    let dirR2 = dir.x * dir.x + dir.y * dir.y;
+    let zro = dirR2 < (1.0 / 32768.0);
+    var dirR: f32 = 1.0 / sqrt(dirR2);
+    if (zro) {
+        dirR = 1.0;
+        dir.x = 1.0;
+    }
+    dir.x = dir.x * dirR;
+    dir.y = dir.y * dirR;
+    len = len * 0.5;
+    len = len * len;
+    // Fenster strecken und die Kante je nach Kantennaehe verschieben.
+    let stretch: f32 = (dir.x * dir.x + dir.y * dir.y)
+        * (1.0 / max(abs(dir.x), abs(dir.y)));
+    let len2 = vec2<f32>(1.0 + (stretch - 1.0) * len, 1.0 + (-0.5) * len);
+    let lob: f32 = 0.5 + ((1.0 / 4.0 - 0.04) - 0.5) * len;
+    let clp: f32 = 1.0 / lob;
+
+    // Akkumulation in der Tap-Reihenfolge des Originals.
+    var aC = vec3<f32>(0.0, 0.0, 0.0);
+    var aW: f32 = 0.0;
+    easu_tap(&aC, &aW, vec2(0.0, -1.0), pp, dir, len2, lob, clp, b);
+    easu_tap(&aC, &aW, vec2(1.0, -1.0), pp, dir, len2, lob, clp, c);
+    easu_tap(&aC, &aW, vec2(-1.0, 1.0), pp, dir, len2, lob, clp, i);
+    easu_tap(&aC, &aW, vec2(0.0, 1.0), pp, dir, len2, lob, clp, j);
+    easu_tap(&aC, &aW, vec2(0.0, 0.0), pp, dir, len2, lob, clp, fc);
+    easu_tap(&aC, &aW, vec2(-1.0, 0.0), pp, dir, len2, lob, clp, e);
+    easu_tap(&aC, &aW, vec2(1.0, 1.0), pp, dir, len2, lob, clp, k);
+    easu_tap(&aC, &aW, vec2(2.0, 1.0), pp, dir, len2, lob, clp, l);
+    easu_tap(&aC, &aW, vec2(2.0, 0.0), pp, dir, len2, lob, clp, h);
+    easu_tap(&aC, &aW, vec2(1.0, 0.0), pp, dir, len2, lob, clp, g);
+    easu_tap(&aC, &aW, vec2(1.0, 2.0), pp, dir, len2, lob, clp, o);
+    easu_tap(&aC, &aW, vec2(0.0, 2.0), pp, dir, len2, lob, clp, n);
+
+    // Normieren und an die naechsten 2x2 (f, g, j, k) klemmen (Dering).
+    let min4 = min(min(min(fc, g), j), k);
+    let max4 = max(max(max(fc, g), j), k);
+    let cOut = clamp(aC / aW, min4, max4);
+    return vec4<f32>(cOut, 1.0);
+}
+
+// RCAS teilt sich Gruppe 3 und dasselbe Layout mit EASU (Quelle +
+// FsrCon): das Bind-Group-Objekt des RCAS-Passes tauscht nur die
+// Quelle — binding 0 haelt dann das EASU-Zwischenbild.
+
+/// Randklemme wie ein Clamp-Sampler (CPU: dieselbe Klemme).
+fn rcas_load(p: vec2<i32>, grenze: vec2<i32>) -> vec3<f32> {
+    return textureLoad(up_src, clamp(p, vec2<i32>(0, 0), grenze), 0).rgb;
+}
+
+@fragment
+fn fs_rcas(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
+    let sz = textureDimensions(up_src);
+    let grenze = vec2<i32>(i32(sz.x) - 1, i32(sz.y) - 1);
+    let q = vec2<i32>(i32(frag.x), i32(frag.y));
+    // 5-Punkt-Kreuz: b oben, d links, e Mitte, f rechts, h unten.
+    let b = rcas_load(q + vec2(0, -1), grenze);
+    let d = rcas_load(q + vec2(-1, 0), grenze);
+    let e = rcas_load(q, grenze);
+    let f = rcas_load(q + vec2(1, 0), grenze);
+    let hh = rcas_load(q + vec2(0, 1), grenze);
+    let mn4 = min(min(min(b, d), f), hh);
+    let mx4 = max(max(max(b, d), f), hh);
+    // Begrenzer: wie weit darf der Lobe, ohne 0..1 zu verlassen?
+    // (Epsilon-Klemmen spiegeln die CPU-Seite; trifft nur exakt 0/1.)
+    let hitMin = min(mn4, e) * (1.0 / max(4.0 * mx4, vec3(1e-30)));
+    let hitMax = (1.0 - max(mx4, e)) * (1.0 / min(4.0 * mn4 + (-4.0), vec3(-1e-30)));
+    let lobe = max(-hitMin, hitMax);
+    // FSR_RCAS_LIMIT = 0.25 - 1/16 = 0.1875, mal Blende (FsrRcasCon).
+    let lobeF: f32 = max(-0.1875, min(max(max(lobe.x, lobe.y), lobe.z), 0.0)) * fsr_con.sharp;
+    let rcpL: f32 = 1.0 / (4.0 * lobeF + 1.0);
+    let o = (lobeF * b + lobeF * d + lobeF * hh + lobeF * f + e) * rcpL;
+    return vec4<f32>(o, 1.0);
+}
