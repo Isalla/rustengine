@@ -82,6 +82,11 @@ honest state of repair. ✅ done and test-covered · 🟡 partially built ·
 - [x] Import pipeline wrapping `re-io` (`re-editor::import` — `import_gltf`, `import.preview`/`import.gltf` capabilities, Roundtrip-Test)
 - [x] Undo/redo as reversible systems (`re-editor::undo` — `Command<T>` trait, `CommandStack` with cursor, built-in commands for camera/selection/view-mode, `editor.undo/redo/history` capabilities)
 - [x] Worldbuilder project loader (`re-editor::project` — `ProjectDoc` mit Pfad/Dirty, `project.new/load/save/close/info` capabilities, Roundtrip-Test)
+- [ ] Editor frontend P1: widget toolkit (draw list, text atlas, input
+      routing, docking manifest, theme) + the `default` preset with the
+      engine's own identity — data-driven per ADR-0001; the `ue5`
+      preset (P2) follows from the reference set
+      ([editor-ui](editor-ui.md))
 - [ ] More file formats (breadth over single-tool migration):
       registry-driven importers/exporters — FBX (meshes & animation),
       OBJ legacy and USD (scene interchange) on top of the existing

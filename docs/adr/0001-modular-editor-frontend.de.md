@@ -8,7 +8,9 @@
 - **Bezug:** [architecture.de.md](../architecture.de.md),
   [ki-integration.de.md](../ki-integration.de.md) (Regel der doppelten
   Adressierbarkeit), [ADR-0002](0002-authoring-surfaces-and-ai-assistant.de.md)
-  (Autor-Oberflächen auf diesem Frontend), Roadmap M4 (Editor)
+  (Autor-Oberflächen auf diesem Frontend),
+  [editor-ui.de.md](../editor-ui.de.md) (Preset-Identität,
+  Referenz-Satz, offene Lücken), Roadmap M4 (Editor)
 
 ## Kontext
 
@@ -99,21 +101,25 @@ eigene Presets sind einfach weitere Daten.
 
 ## Phasen
 
-- **P1 — ein Layout, von Anfang an datengetrieben gebaut.** Viewport +
-  Outliner + Inspector + Konsole implementieren, aber jedes Control an
-  einen Capability-Namen binden, das Layout aus einem Manifest lesen und
-  Look/Labels aus einem Theme. Kostet gegenüber Hartcodieren kaum Mehr-
+- **P1 — Toolkit + `default`-Preset, von Anfang an datengetrieben
+  gebaut.** Viewport + Outliner + Inspector + Konsole implementieren,
+  aber jedes Control an einen Capability-Namen binden, das Layout aus
+  einem Manifest lesen und Look/Labels aus einem Theme. Das erste
+  Preset ist die **eigene Identität** der Engine (warme Dunkelgraus,
+  Rust-Orange-Akzent, Command-Palette, Assistent-Dock) — kein Klon
+  eines Fremd-Werkzeugs. Kostet gegenüber Hartcodieren kaum Mehr-
   arbeit, weil die Capabilities schon existieren.
-- **P2 — das `ue5`-Preset extrahieren.** Die UE5-Referenz-Screenshots
-  werden seine Spezifikation (Menüreihenfolge, Panel-Position, deutsche
-  Labels).
+- **P2 — das `ue5`-Preset extrahieren** als optionalen Look für
+  Umsteiger von Unreal. Die UE5-Referenz-Screenshots werden seine
+  Spezifikation (Menüreihenfolge, Panel-Position, deutsche Labels).
 - **P3 — das `unity`-Preset ergänzen** als zweites Manifest + Theme;
   Preset-Auswahl beim Start; später nutzer-eigene Manifeste.
 
 ## Nicht Teil davon (zunächst)
 
-Das Frontend selbst ist **noch nicht** gebaut. Die Umsetzung startet,
-sobald die UE5-Referenz-Screenshots vollständig sind, damit die erste
-Panel-Arbeit ein exaktes Ziel hat. Dieses ADR legt die *Form* fest, in die
-die Umsetzung passen muss; es legt das Manifest-Dateiformat noch nicht
-final fest — das entscheidet P1.
+Die UE5-Referenz-Screenshots sind am 2026-11-26 geliefert — die
+Umsetzung ist damit freigegeben und startet mit P1. Das Inventar des
+Satzes und die Lücken, die er noch hat, stehen in
+[editor-ui.de.md](../editor-ui.de.md). Dieses ADR legt die *Form* fest,
+in die die Umsetzung passen muss; das Manifest-Dateiformat entscheidet
+P1.

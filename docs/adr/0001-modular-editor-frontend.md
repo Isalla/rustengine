@@ -8,7 +8,8 @@ English | [Deutsch](0001-modular-editor-frontend.de.md)
 - **Relates to:** [architecture.md](../architecture.md),
   [ki-integration.md](../ki-integration.md) (rule of double addressability),
   [ADR-0002](0002-authoring-surfaces-and-ai-assistant.md) (authoring
-  surfaces over this frontend), roadmap M4 (editor)
+  surfaces over this frontend), [editor-ui.md](../editor-ui.md) (preset
+  identity, reference set, open gaps), roadmap M4 (editor)
 
 ## Context
 
@@ -96,19 +97,25 @@ data.
 
 ## Phasing
 
-- **P1 — one layout, built data-driven from day one.** Implement the
-  viewport + outliner + inspector + console, but bind every control to a
-  capability name, read the layout from a manifest, and read look/labels
-  from a theme. Costs almost nothing extra over hardcoding because the
-  capabilities already exist.
-- **P2 — extract the `ue5` preset.** The UE5 reference screenshots become
-  its spec (menu order, panel placement, German labels).
+- **P1 — toolkit + `default` preset, built data-driven from day one.**
+  Implement the viewport + outliner + inspector + console, but bind
+  every control to a capability name, read the layout from a manifest,
+  and read look/labels from a theme. The first preset is the engine's
+  **own identity** (warm dark grays, rust-orange accent, command
+  palette, assistant dock) — not a clone of any host tool. Costs
+  almost nothing extra over hardcoding because the capabilities
+  already exist.
+- **P2 — extract the `ue5` preset** as the optional look for users
+  arriving from Unreal. The UE5 reference screenshots are its spec
+  (menu order, panel placement, German labels).
 - **P3 — add the `unity` preset** as a second manifest + theme; add preset
   selection at startup; later allow user-authored manifests.
 
 ## Out of scope (for now)
 
-The frontend itself is **not** built yet. Implementation starts once the
-UE5 reference screenshots are complete, so the first panel work has an
-exact target. This ADR fixes the *shape* the implementation must fit into;
-it does not pre-commit the manifest file format, which P1 will finalize.
+The UE5 reference screenshots were delivered on 2026-11-26 — the
+frontend build is unblocked and starts with P1. The inventory of the
+set and the gaps still open in it live in
+[editor-ui.md](../editor-ui.md). This ADR fixes the *shape* the
+implementation must fit into; the manifest file format is decided in
+P1.
