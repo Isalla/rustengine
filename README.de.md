@@ -106,6 +106,9 @@ Systematische Fahndung — Bedrohungsmodell, Audit-Gänge und Fund-Log:
 - **M8** — Audio (SFX-Events), VFX (GPU-Partikel, Effekt-Graphen), Physik, Animation
 - **M9** — Go-Dienste (Netcode, dedizierter Server, Buildfarm) + WebGPU-Build
 - **M10** — Konsolen-Backends (private SDK-Module), Publishing
+- **M11** — KI-nativer Editor: ein Assistenten-Panel (Passiv/Live/Chat), jede Editor-Fähigkeit ein Registry-Tool für Menschen und Agenten gleichermaßen ([docs/ki-integration.de.md](docs/ki-integration.de.md), ADR-0002)
+- **M12** — Prozedurale Welten: Autoren-Beschreibung zuerst, Seed daraus abgeleitet (Content-Adresse); Runtime-Chunk-Gen über denselben `CellSource`, PCG-Graphen als ECS-Schedules, Erzeugen → Nachbearbeiten
+- **M13** — Geräte-Profile & Auto-Downgrade: Profile als Daten (Pi 3/4/5 → Desktop), Profil-Prüfer, rückholbare Downgrade-Werkzeugkette (Mip-Kappung, LODs, Sprite-Backen, Vorwärts-Fallback) ([docs/roadmap.de.md](docs/roadmap.de.md))
 - **Leitfeature** — Strategie↔Ego: Kameraflug in die Einheit ohne Ladebildschirm; die Steuerungs-Übergabe selbst funktioniert bereits mitten im Flug (M3e), die volle Flug-Choreografie folgt mit [docs/cinema.de.md](docs/cinema.de.md)
 
 ## Konsolen

@@ -106,6 +106,9 @@ log: [docs/security.md](docs/security.md) · [docs/bugs.md](docs/bugs.md).
 - **M8** — audio (SFX events), VFX (GPU particles, effect graphs), physics, animation
 - **M9** — Go services (netcode, dedicated server, build farm) + WebGPU build
 - **M10** — console backends (private SDK modules), publishing
+- **M11** — AI-native editor: one assistant panel (passive/live/chat), every editor capability a registry tool for humans and agents alike ([docs/ki-integration.md](docs/ki-integration.md), ADR-0002)
+- **M12** — procedural worlds: authored description first, seed derived from it (content address); runtime chunk gen through the same `CellSource`, PCG graphs as ECS schedules, generate → author deltas
+- **M13** — device profiles & auto-downgrade: profiles as data (Pi 3/4/5 → desktop), profile checker, reversible downgrade tool chain (mip caps, LODs, sprite-bake, forward fallback) ([docs/roadmap.md](docs/roadmap.md))
 - **Signature feature** — strategy↔first-person: camera flight into the unit with no loading screen; the control handoff itself already works mid-flight (M3e), the full flight choreography comes with [docs/cinema.md](docs/cinema.md)
 
 ## Consoles

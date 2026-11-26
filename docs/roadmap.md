@@ -205,7 +205,10 @@ way around. No seed lottery.*
       world ID is a content address. Variations = hashed counter
       suffix („ten more like this"). Per-layer hash namespaces keep
       tweaking stable: editing one section re-rolls only that layer's
-      random stream, the rest of the world stays identical
+      random stream, the rest of the world stays identical. Targeted
+      edits work like inpainting in image generation: the control
+      bitmaps are the mask — a painted change re-rolls only the chunks
+      that read it (plus a blend margin), never the whole world
 - [ ] Deterministic generator core: noise fields and rule evaluation
       on the derived streams — reproducible across platforms, so
       multiplayer syncs the description (or its hash) instead of
@@ -219,6 +222,34 @@ way around. No seed lottery.*
 - [ ] Generate → author: hand edits persist as deltas/override regions
       over the generated base; a bake step exports any region to
       static cells for shipping
+
+## M13 — Device profiles & auto-downgrade ⬜
+
+*The product owner's test case: an MMO client that must also run on
+Raspberry Pi hardware. The engine rule is the inverse of the usual
+one: do not build the game small for the weakest device — build it
+right and let the engine scale it down. Honest boundary: a fully
+automatic "runs anywhere" is not promised; what ships is detect +
+propose + one-click apply, because every step is a registry tool
+(double addressability, M11) that human and agent invoke alike.*
+
+- [ ] Device profiles as data: capability manifests (RAM cap, GPU tier,
+      target fps, feature flags) — Pi 3/4/5 (V3D), WebGPU, mobile,
+      desktop. The same profiles drive the CI render harness, so
+      "Pi-tier" is a measurable claim, not a feeling
+- [ ] Profile checker: a pass over the project that *reports* what
+      breaks the target — textures over the RAM cap, mandatory deferred
+      features, particle budgets, entity density, draw-call counts —
+      with numbers and the named fix tool per finding
+- [ ] Downgrade tool chain (registry tools, each reversible and
+      logged): texture mip capping, retargeted asset variants,
+      high-poly → LOD/optimize, real-time light → baked, 3D prop →
+      sprite-bake via the iso baker (`re-core::iso`), forward fallback
+      path instead of deferred (ADR-0003 tiering)
+- [ ] Proof loop: run the game against a profile in the headless
+      harness — frame time, memory, bandwidth measured per tier; the
+      roadmap box flips only when a real project passes on real Pi
+      hardware
 
 ## Wiki — documentation in three layers 🟡
 

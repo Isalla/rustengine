@@ -212,7 +212,10 @@ Kein Seed-Glücksspiel.*
       Welt-ID ist eine Content-Adresse. Varianten = gezählter
       Hash-Suffix („zehn ähnliche"). Hash-Namensräume je Layer: wer
       eine Sektion ändert, würfelt nur deren Zufallsstrom neu — der
-      Rest der Welt bleibt identisch
+      Rest der Welt bleibt identisch. Gezielte Änderungen wirken wie
+      Inpainting in der Bildgenerierung: die Control-Bitmaps sind die
+      Maske — eine gemalte Änderung würfelt nur die Zellen neu, die
+      sie lesen (plus Blend-Rand), nie die ganze Welt
 - [ ] Deterministischer Generator-Kern: Noise-Felder und
       Regelauswertung auf den abgeleiteten Strömen —
       plattformübergreifend reproduzierbar, im Multiplayer wandert die
@@ -228,6 +231,36 @@ Kein Seed-Glücksspiel.*
 - [ ] Erzeugen → Nachbearbeiten: Hand-Edits bleiben als
       Delta-/Override-Regionen über der generierten Basis liegen; ein
       Bake-Schritt exportiert jede Region zu statischen Zellen
+
+## M13 — Geräte-Profile & Auto-Downgrade ⬜
+
+*Produkt-Testfall des Eigentümers: ein MMO-Client, der auch auf
+Raspberry-Pi-Hardware laufen muss. Die Engine-Regel kehrt die
+übliche um: das Spiel wird nicht klein für das schwächste Gerät
+gebaut, sondern richtig — und die Engine skaliert es herunter.
+Ehrliche Grenze: kein vollautomatisches „läuft überall" wird
+versprochen; geliefert wird erkennen + vorschlagen + ein Klick
+ausführen, denn jeder Schritt ist ein Registry-Tool (doppelte
+Adressierbarkeit, M11), das Mensch und Agent gleich aufrufen.*
+
+- [ ] Geräte-Profile als Daten: Fähigkeits-Manifeste (RAM-Kappe,
+      GPU-Tier, Ziel-fps, Feature-Flags) — Pi 3/4/5 (V3D), WebGPU,
+      Mobile, Desktop. Dieselben Profile treiben das CI-Render-Harness,
+      damit „Pi-Tier" eine messbare Aussage ist, kein Gefühl
+- [ ] Profil-Prüfer: ein Gang über das Projekt, der *meldet*, was das
+      Ziel bricht — Texturen über der RAM-Kappe, Pflicht-Deferred,
+      Partikel-Budgets, Entity-Dichte, Draw-Call-Zahl — mit Zahlen und
+      dem jeweils genannten Fix-Werkzeug je Befund
+- [ ] Downgrade-Werkzeugkette (Registry-Tools, jeder Schritt rückholbar
+      und protokolliert): Mip-Kappung bei Texturen, neu geretargete
+      Asset-Varianten, High-Poly → LOD/Optimieren, Echtzeitlicht →
+      backen, 3D-Requisite → Sprite-Backen über den Iso-Baker
+      (`re-core::iso`), Vorwärts-Fallback statt Deferred (ADR-0003-
+      Tiering)
+- [ ] Beweis-Schleife: das Spiel gegen ein Profil im Headless-Harness
+      laufen lassen — Frame-Zeit, Speicher, Bandbreite pro Tier
+      gemessen; der Roadmap-Kasten erst sichert sich, wenn ein echtes
+      Projekt auf echter Pi-Hardware besteht
 
 ## Wiki — Doku in drei Stufen 🟡
 
