@@ -158,7 +158,65 @@ impl Project {
         if p.scene.nodes.is_empty() && p.library.meshes.is_empty() && p.name.is_empty() {
             bail!("file does not look like a WorldBuilder project");
         }
+        p.validate_structure()
+            .with_context(|| format!("validate {}", path.display()))?;
         Ok(p)
+    }
+
+    /// Structural sanity check for loaded files: parent/child cycles in the
+    /// scene and joint parent cycles in skeletons would send the recursive
+    /// helpers (`world_transform`, `walk`, `global_transform`) into endless
+    /// recursion. Reject such files at load time instead of crashing later.
+    pub fn validate_structure(&self) -> Result<()> {
+        use crate::id::NodeId;
+        use std::collections::BTreeSet;
+        let nodes = &self.scene.nodes;
+        // Parent chains must terminate (a cycle revisits a node).
+        for (id, node) in nodes {
+            let mut cur = node.parent;
+            let mut steps = 0usize;
+            while let Some(p) = cur {
+                if p == *id || steps > nodes.len() {
+                    bail!("scene node {id}: parent cycle");
+                }
+                match nodes.get(&p) {
+                    Some(n) => cur = n.parent,
+                    None => break, // dangling parent: treated as root boundary
+                }
+                steps += 1;
+            }
+        }
+        // Children must form a forest over the roots: no cycles, no sharing
+        // (a shared child would be walked twice and could hide a cycle).
+        let mut visited: BTreeSet<NodeId> = BTreeSet::new();
+        let mut stack: Vec<NodeId> = self.scene.roots.clone();
+        while let Some(id) = stack.pop() {
+            if !visited.insert(id) {
+                bail!("scene node {id}: reachable twice (cycle or shared child)");
+            }
+            if let Some(n) = nodes.get(&id) {
+                stack.extend(n.children.iter().copied());
+            }
+        }
+        // Joint parent chains must terminate as well.
+        for (sid, skel) in &self.library.skeletons {
+            let n = skel.joints.len();
+            for j in 0..n {
+                let mut cur = skel.joints[j].parent;
+                let mut steps = 0usize;
+                while let Some(p) = cur {
+                    if p == j || steps > n {
+                        bail!("skeleton {sid}: joint parent cycle");
+                    }
+                    if p >= n {
+                        break;
+                    }
+                    cur = skel.joints[p].parent;
+                    steps += 1;
+                }
+            }
+        }
+        Ok(())
     }
 }
 
@@ -167,6 +225,36 @@ mod tests {
     use super::*;
     use crate::scene::Node;
     use crate::transform::Transform;
+
+    #[test]
+    fn validate_struktur_erkennt_zyklen() {
+        // Parent cycle: A is B's parent and B is A's parent.
+        let mut p = Project::new("z");
+        let a = p.scene.insert(None, Node { name: "A".into(), ..Default::default() });
+        let b = p.scene.insert(Some(a), Node { name: "B".into(), ..Default::default() });
+        p.scene.get_mut(a).unwrap().parent = Some(b);
+        assert!(p.validate_structure().is_err(), "parent cycle must be rejected");
+
+        // Children cycle without parent backlink, reachable from a root.
+        let mut q = Project::new("z");
+        let x = q.scene.insert(None, Node { name: "X".into(), ..Default::default() });
+        let y = q.scene.insert(None, Node { name: "Y".into(), ..Default::default() });
+        q.scene.get_mut(x).unwrap().children.push(y);
+        q.scene.get_mut(y).unwrap().children.push(x);
+        assert!(q.validate_structure().is_err(), "children cycle must be rejected");
+
+        // Joint parent cycle in a skeleton.
+        let mut s = Skeleton::new("s");
+        s.joints.push(crate::skeleton::Joint { name: "j0".into(), parent: Some(1), local: Transform::default() });
+        s.joints.push(crate::skeleton::Joint { name: "j1".into(), parent: Some(0), local: Transform::default() });
+        let mut r = Project::new("z");
+        r.library.skeletons.insert(crate::id::SkeletonId(7), s);
+        assert!(r.validate_structure().is_err(), "joint cycle must be rejected");
+
+        // A clean project passes.
+        let clean = Project::new("z");
+        assert!(clean.validate_structure().is_ok());
+    }
 
     #[test]
     fn roundtrip_json() {

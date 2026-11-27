@@ -6,7 +6,7 @@
 //! - Joint-targeted animation channels become `Target::Joint(name)` so clips
 //!   stay reusable; other channels keep concrete node targets.
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use glam::Mat4;
 use std::collections::HashMap;
 use std::path::Path;
@@ -34,12 +34,12 @@ pub fn import(path: &Path) -> Result<Project> {
     // Pass 1: node tree + mesh/material assets.
     if let Some(scene) = document.default_scene().or_else(|| document.scenes().next()) {
         for node in scene.nodes() {
-            imp.convert_node(blob, node, None, &mut p)?;
+            imp.convert_node(blob, node, None, &mut p, 0)?;
         }
     } else {
         for node in document.nodes() {
             if node_is_root(&document, node.index()) {
-                imp.convert_node(blob, node, None, &mut p)?;
+                imp.convert_node(blob, node, None, &mut p, 0)?;
             }
         }
     }
@@ -138,16 +138,22 @@ impl Importer {
     }
 
     /// Convert one glTF node and its subtree; returns our node id.
+    /// Depth-capped: a crafted file may contain a node cycle, which would
+    /// recurse forever here (the `gltf` crate does not check acyclicity).
     fn convert_node<'s, F>(
         &mut self,
         blob: F,
         node: gltf::scene::Node,
         parent: Option<NodeId>,
         p: &mut Project,
+        depth: u32,
     ) -> Result<NodeId>
     where
         F: Copy + for<'a> Fn(gltf::Buffer<'a>) -> Option<&'s [u8]>,
     {
+        if depth > 128 {
+            bail!("node hierarchy deeper than 128 (cycle in file?)");
+        }
         let gidx = node.index();
         let local = Self::node_transform(&node);
         let world = match parent {
@@ -259,7 +265,7 @@ impl Importer {
 
         for child in node.children() {
             self.parent_gltf.insert(child.index(), gidx);
-            self.convert_node(blob, child, Some(node_id), p)?;
+            self.convert_node(blob, child, Some(node_id), p, depth + 1)?;
         }
         Ok(node_id)
     }

@@ -997,6 +997,17 @@ impl Inner {
         if let Some((_, v)) = self.tex_cache.get(path) {
             return Some(v.clone());
         }
+        // Decompression-bomb guard: read only the header first and refuse
+        // absurd sizes before decode allocates (Pi RAM is precious).
+        let (dw, dh) = image::ImageReader::open(path)
+            .ok()?
+            .with_guessed_format()
+            .ok()?
+            .into_dimensions()
+            .ok()?;
+        if dw > 8192 || dh > 8192 {
+            return None;
+        }
         let img = image::ImageReader::open(path)
             .ok()?
             .with_guessed_format()

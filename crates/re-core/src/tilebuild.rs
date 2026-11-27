@@ -351,8 +351,13 @@ pub fn paint_line(
     tile: u32,
 ) -> Result<usize> {
     check_tile(p, map, tile, "line")?;
-    let dx = (x1 - x0).abs();
-    let dz = (z1 - z0).abs();
+    // i64 deltas: i32 subtraction of extreme coordinates would wrap and
+    // the loop below would never terminate.
+    let dx = (x1 as i64 - x0 as i64).abs();
+    let dz = (z1 as i64 - z0 as i64).abs();
+    if dx.max(dz) as usize > crate::ops::MAX_PAINT_CELLS {
+        bail!("line too long (limit {} cells)", crate::ops::MAX_PAINT_CELLS);
+    }
     let sx = if x0 < x1 { 1 } else { -1 };
     let sz = if z0 < z1 { 1 } else { -1 };
     let mut err = dx - dz;
@@ -379,8 +384,13 @@ pub fn paint_line(
 
 fn line_cells(x0: i32, z0: i32, x1: i32, z1: i32) -> Vec<(i32, i32)> {
     let mut out = Vec::new();
-    let dx = (x1 - x0).abs();
-    let dz = (z1 - z0).abs();
+    // i64 deltas (see paint_line): wrapped i32 deltas never terminate.
+    let dx = (x1 as i64 - x0 as i64).abs();
+    let dz = (z1 as i64 - z0 as i64).abs();
+    let cap = crate::ops::MAX_PAINT_CELLS as i64;
+    if dx > cap || dz > cap {
+        return out; // absurd extent: no cells
+    }
     let sx = if x0 < x1 { 1 } else { -1 };
     let sz = if z0 < z1 { 1 } else { -1 };
     let mut err = dx - dz;

@@ -94,8 +94,8 @@ mod tests {
     use super::*;
     use std::fs;
 
-    fn workspace() -> (PathBuf, Workspace) {
-        let dir = std::env::temp_dir().join(format!("re_ws_{}", std::process::id()));
+    fn workspace(tag: &str) -> (PathBuf, Workspace) {
+        let dir = std::env::temp_dir().join(format!("re_ws_{tag}_{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(dir.join("sub")).unwrap();
         fs::write(dir.join("da.wbproj"), "{}").unwrap();
@@ -104,7 +104,7 @@ mod tests {
 
     #[test]
     fn relative_und_absolute_pfade_innerhalb() {
-        let (dir, ws) = workspace();
+        let (dir, ws) = workspace("rel");
         assert_eq!(ws.resolve("da.wbproj").unwrap(), dir.join("da.wbproj").canonicalize().unwrap());
         let abs = dir.join("sub/neu.wbproj");
         assert_eq!(ws.resolve(abs.to_str().unwrap()).unwrap(), abs);
@@ -113,7 +113,7 @@ mod tests {
 
     #[test]
     fn ausbruch_wird_abgelehnt() {
-        let (dir, ws) = workspace();
+        let (dir, ws) = workspace("esc");
         assert!(ws.resolve("../andere.wbproj").is_err());
         assert!(ws.resolve("sub/../../andere.wbproj").is_err());
         assert!(ws.resolve("/etc/passwd").is_err());
@@ -124,7 +124,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn symlink_aus_der_workspace_wird_abgelehnt() {
-        let (dir, ws) = workspace();
+        let (dir, ws) = workspace("sym");
         let aussen = std::env::temp_dir().join(format!("re_ws_out_{}", std::process::id()));
         fs::create_dir_all(&aussen).unwrap();
         fs::write(aussen.join("geheim.txt"), "x").unwrap();

@@ -2,6 +2,11 @@
 //! shared by CLI, MCP server and GUI.
 
 use crate::animation::{Animation, Channel, ChannelPath, KeyValue, Space, Target};
+
+/// Upper bound for one paint operation (fill_rect, paint_line): keeps a
+/// bogus coordinate range from an agent or file from allocating without
+/// bound. Generous for real tilemaps (1000×1000 cells).
+pub const MAX_PAINT_CELLS: usize = 1_000_000;
 use crate::id::{AnimationId, MaterialId, MeshId, NodeId, SkeletonId, TileMapId, TileSetId};
 use crate::mesh::Skin;
 use crate::primitives::{self, PrimitiveKind};
@@ -553,6 +558,8 @@ pub fn tilemap_set_cell(p: &mut Project, map: TileMapId, x: i32, z: i32, tile: u
 }
 
 /// Paint an inclusive rectangle of cells. Returns how many cells were written.
+/// Capped at [`MAX_PAINT_CELLS`] so a bogus range from an agent or file
+/// cannot allocate without bound.
 pub fn tilemap_fill_rect(
     p: &mut Project,
     map: TileMapId,
@@ -565,6 +572,10 @@ pub fn tilemap_fill_rect(
     validate_tile(p, map, tile)?;
     let (xa, xb) = (x0.min(x1), x0.max(x1));
     let (za, zb) = (z0.min(z1), z0.max(z1));
+    let area = (xb as i64 - xa as i64 + 1) * (zb as i64 - za as i64 + 1);
+    if area > MAX_PAINT_CELLS as i64 {
+        bail!("fill_rect would paint {area} cells (limit {MAX_PAINT_CELLS})");
+    }
     let m = p
         .library
         .tilemaps
