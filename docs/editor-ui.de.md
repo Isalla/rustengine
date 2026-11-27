@@ -64,30 +64,42 @@ kein ausgeliefertes Asset).
 | `UE5_17.png` | geöffnetes Toolbar-Dropdown (Anzeigemodus) + weißer Hover-Tooltip |
 | `UE5_18.png` | Kontext-Menü des Viewport-Tabs (Häkchen, deaktivierte Einträge, Sektions-Labels) |
 | `Bewegungseditor*.png` | Sequencer-Referenz für M11: Spur-Ansicht (Lineal, Playhead, Key-Rauten, Kamera-Spur), Icon-Schiene mit Icon+Text-Flyout-Rastern (ausgewählt = blau), modale Message-Box („NumLock aktiviert") |
+| `UE5_19.png` | Content-Drawer ausgeklappt (unteres Regal): Asset-Kacheln, Ordner-Baum mit Suche, Filter-Leiste, Ansichtsumschalter; Details-Panel als echter Baum (Kategorie-Köpfe mit Aufklapp-Pfeilen, Eigenschafts-Zeilen mit Reset-Icons, Enum-Dropdown, Zahnrad-Menü); dunkler Icon-Tooltip („Aktuelle Auswahl löschen") |
+| `cmd.png` | Konsolen-Typ-Auswahl (Cmd / Python / Python (REPL)) mit Häkchen — der Konsolen-Einstieg |
+| `Editordiagnose.png` | modaler Dialog als Fenster: Titelbalken mit Schließen-Knopf, Tab-Pills (Alles anzeigen / Nur Warnungen), Zahnrad-Menü, Tabelle mit Spaltenköpfen (Aktuell / Expected / Fehlschläge / Notify), Sektions-Zeilen, Checkbox-Spalte, status-gefärbte Werte; linke Icon-Schiene mit Text-Knöpfen (ausgewählt = blau) |
+| `Trace-Objekt_1/2.png` | reichhaltiges Toolbar-Dropdown: Suchfeld, Kleinkapett-Sektions-Labels, Radio-Einträge (gefüllter Punkt), Checkbox-Einträge, Shortcut-Spalte, deaktivierte Einträge, **fokusiertes Textfeld (blauer Rand)**, Combo-Box, **Untermenü-Flyout** mit Hover-Hervorhebung (blau), weißer Tooltip über dem Menü |
+| `Zen-Server.png` | Statusleisten-Dropdown mit Sektions-Labels + ZweitEbene-Untermenü (Icon-Einträge), Hover-Hervorhebung |
+| `revisionskontrolle.png` | Statusleisten-Menü mit deaktiviertem Eintrag (Verbots-Icon) und Tooltip über dem Menü |
 
 Bewiesene Interaktions-Zustände: Hover/ausgewählt (blau), deaktiviert
-(grau), Tooltip (weiße Box), Untermenü-Pfeil, Separatoren mit
-Kleinkapett-Labels, Textkürzung mit Ellipse, dünne Scrollbars,
-Tab-Schließen-Knopf, Menü-Suchfeld, Kontextmenü-Suche, Inline-
-Textbearbeitung mit Auswahl, Häkchen-Menüpunkte, farbige Log-Zeilen,
-Asset-Hover-Karten, modale Message-Box.
+(grau, mit Verbots-Icon), Tooltip (weiße Box, auch über Menüs verankert;
+dunkle Variante mit Icon), Untermenü-Pfeil + geöffnetes Flyout,
+Separatoren mit Kleinkapett-Labels, Textkürzung mit Ellipse, dünne
+Scrollbars, Tab-Schließen-Knopf, Menü-Suchfeld, Kontextmenü-Suche,
+Inline-Textbearbeitung mit Auswahl, fokusiertes Textfeld (Akzent-Rand),
+Radio-Einträge, Checkbox-Einträge und Checkbox-Tabellenspalten,
+Combo-Box, Häkchen-Menüpunkte, farbige Log-Zeilen, Asset-Hover-Karten,
+modale Message-Box, modaler Dialog mit Tabelle, Tab-Pills,
+Content-Drawer-Kachel-Regal.
 
 ## 4. Lücken — im Referenz-Satz noch fehlt
 
-Der gelieferte Satz deckt jetzt alle Kern-Widgets. Was bleibt, ist
-Feinarbeit; Toolkit und `ue5`-Preset können beide weitermachen:
+Der gelieferte Satz deckt jetzt alle Kern-Widgets und alle Menü-Formen.
+Was bleibt, ist Feinarbeit; Toolkit und `ue5`-Preset können beide
+weitermachen:
 
-1. **Konsole / Command-Palette** mit Autovervollständigungs-Liste.
+1. **Command-Palette / Konsolen-Autovervollständigung** — `cmd.png`
+   zeigt die Konsolen-Typ-Auswahl, aber nicht die Vervollständigungs-
+   Liste.
 2. **Schwebendes Panel + Dock-Drop-Hinweise** — abgetrennter
-   Titelbalken, Tab-Zieh-Ghost, Drop-Ziel-Linien (UE5_16 zeigt ein
-   gedocktes Tab-Panel, keinen Schweb-Zieh-Zustand).
-3. **Content-Drawer ausgeklappt** (geöffnetes unteres Regal).
-4. **Details-Interaktions-Zustände** — offenes Enum-Dropdown,
-   Farb-Picker, Wert-Drag, Reset-Icon-Hover (Inline-Umbenennung ist
-   jetzt durch `UE5_14` abgedeckt).
-5. **Fortschritts-Dialog** (die modale Message-Box deckt das
-   Bewegungseditor-Bild ab).
-6. Play-Mode-Overlay im Viewport (optional).
+   Titelbalken, Tab-Zieh-Ghost, Drop-Ziel-Linien (kein Bild zeigt
+   einen Schweb-Zieh-Zustand).
+3. **Details-Farb-Picker + Wert-Drag** — Enum-Dropdown und Reset-Icons
+   deckt `UE5_19` ab; das Farb-Fenster fehlt.
+4. **Fortschritts-Dialog** (ein modaler Dialog ist jetzt durch
+   `Editordiagnose.png` bewiesen, nur nicht die Fortschrittsbalken-
+   Variante).
+5. Play-Mode-Overlay im Viewport (optional).
 
 Icons: die Screenshots zeigen Menü-Icons zu klein für Vektor-Extraktion.
 Nach ADR-0001 ist Icon-Treue Art-Arbeit im Theme — das Toolkit liefert

@@ -63,30 +63,39 @@ material, not a shipped asset).
 | `UE5_17.png` | opened toolbar dropdown (view mode) + white hover tooltip |
 | `UE5_18.png` | viewport-tab context menu (checkmarks, disabled entries, section labels) |
 | `Bewegungseditor*.png` | sequencer reference for M11: track view (ruler, playhead, key diamonds, camera track), tool rail with icon+text flyout grids (selected = blue), modal message box ("NumLock aktiviert") |
+| `UE5_19.png` | Content Drawer expanded (bottom shelf): asset tiles, folder tree with search, filter bar, view toggles; Details panel as real tree (category headers with expand arrows, property rows with reset icons, enum dropdown, gear menu); dark icon tooltip ("Aktuelle Auswahl löschen") |
+| `cmd.png` | console type selector (Cmd / Python / Python (REPL)) with checkmark — the console entry point |
+| `Editordiagnose.png` | modal dialog window: title bar with close button, tab pills (Alles anzeigen / Nur Warnungen), gear menu, table with column headers (Aktuell / Expected / Fehlschläge / Notify), section rows, checkbox column, status-colored values; left icon rail with text buttons (selected = blue) |
+| `Trace-Objekt_1/2.png` | rich toolbar dropdown: search field, small-caps section labels, radio items (filled dot), checkbox items, shortcut column, disabled items, **focused text input (blue border)**, combo box, **submenu flyout** with hover highlight (blue), white tooltip anchored above the menu |
+| `Zen-Server.png` | status-bar dropdown with section labels + second-level submenu (icon entries), hover highlight |
+| `revisionskontrolle.png` | status-bar menu with a disabled entry (prohibiting icon) and tooltip anchored above the menu |
 
 Interaction states the set now proves: hover/selected (blue),
-disabled (gray), tooltip (white box), submenu arrow, section
-separators with small-caps labels, text truncation with ellipsis,
-thin scrollbars, tab close button, menu search field, context-menu
-search, inline text edit with selection, checkmark menu items,
-colored log lines, asset hover cards, modal message box.
+disabled (gray, with prohibiting icon), tooltip (white box, also
+anchored above menus; dark variant with icon), submenu arrow + opened
+flyout, section separators with small-caps labels, text truncation with
+ellipsis, thin scrollbars, tab close button, menu search field,
+context-menu search, inline text edit with selection, focused text
+input (accent border), radio items, checkbox items and checkbox table
+columns, combo box, checkmark menu items, colored log lines, asset
+hover cards, modal message box, modal dialog window with table,
+tab pills, content-drawer tile shelf.
 
 ## 4. Gaps — still missing from the reference set
 
-The delivered set now covers every core widget. What remains is
-polish detail; the toolkit and the `ue5` preset can both proceed:
+The delivered set now covers every core widget and every menu form.
+What remains is polish detail; the toolkit and the `ue5` preset can
+both proceed:
 
-1. **Console / command palette** with autocomplete list.
+1. **Command palette / console autocomplete** — `cmd.png` shows the
+   console type selector, but not the autocomplete dropdown list.
 2. **Floating panel + dock drop hints** — detached title bar, tab drag
-   ghost, drop-target lines (UE5_16 shows a docked tabified panel,
-   not a floating drag state).
-3. **Content Drawer expanded** (the bottom shelf opened).
-4. **Details interaction states** — open enum dropdown, color picker,
-   value drag, reset-icon hover (inline rename is now covered by
-   `UE5_14`).
-5. **Progress dialog** (the modal message box is covered by the
-   Bewegungseditor shot).
-6. Play-mode overlay in the viewport (optional).
+   ghost, drop-target lines (no shot shows a floating drag state).
+3. **Details color picker + value drag** — the enum dropdown and reset
+   icons are covered by `UE5_19`; the color swatch popup is not.
+4. **Progress dialog** (a modal dialog window is now proven by
+   `Editordiagnose.png`, just not the progress-bar variant).
+5. Play-mode overlay in the viewport (optional).
 
 Icons: the screenshots show menu icons too small to extract as
 vectors. Per ADR-0001 icon fidelity is art effort carried by the
