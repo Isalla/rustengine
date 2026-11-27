@@ -289,3 +289,50 @@ fn tilemap_expands_to_cells_on_export() {
 
     std::fs::remove_dir_all(&dir).ok();
 }
+
+#[test]
+fn texture_escape_paths_are_skipped() {
+    use re_core::material::Material;
+    use re_core::scene::Node;
+
+    let dir = std::env::temp_dir().join(format!("re_tex_{}", std::process::id()));
+    std::fs::remove_dir_all(&dir).ok();
+    std::fs::create_dir_all(dir.join("sub")).unwrap();
+    // Any bytes work: the exporter embeds the file without decoding it.
+    std::fs::write(dir.join("sub/tex.png"), b"\x89PNG fake").unwrap();
+
+    let mut p = Project::new("tex");
+    let mesh_id = p.library.add_mesh(primitives::generate(PrimitiveKind::Box, 1.0, 1.0, 1));
+    let mut bad = Material::default();
+    bad.name = "bad".into();
+    bad.albedo_texture_id = Some("../../escape.png".into());
+    bad.normal_texture_id = Some("/etc/hostname".into());
+    let bad_id = p.library.add_material(bad);
+    let mut good = Material::default();
+    good.name = "good".into();
+    good.albedo_texture_id = Some("sub/tex.png".into());
+    let good_id = p.library.add_material(good);
+    for (name, m) in [("Bad", bad_id), ("Good", good_id)] {
+        p.scene.insert(
+            None,
+            Node {
+                name: name.into(),
+                transform: Transform::default(),
+                kind: NodeKind::MeshInstance { mesh: mesh_id, material: Some(m), skeleton_node: None },
+                ..Default::default()
+            },
+        );
+    }
+
+    let out = dir.join("scene.gltf");
+    re_io::export(&p, &out).expect("export");
+    let text = std::fs::read_to_string(&out).unwrap();
+    // Exactly one image (the legit relative path); escaping paths embed nothing.
+    assert_eq!(
+        text.matches("\"mimeType\"").count(),
+        1,
+        "escaped texture paths must be skipped, legit relative path embedded"
+    );
+
+    std::fs::remove_dir_all(&dir).ok();
+}

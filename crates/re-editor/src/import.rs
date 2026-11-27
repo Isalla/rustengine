@@ -3,12 +3,14 @@
 //! damit Editor und Agent denselben Einstieg nutzen.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use re_core::project::Project;
 use re_io;
 use re_agent::capability::{CapabilityRegistry, ToolSpec};
 use serde_json::json;
 
 use crate::project::{ProjectDoc, SharedProjectDoc};
+use crate::workspace::Workspace;
 
 /// Ergebnis eines Imports: das geladene Projekt plus eine kurze
 /// Statistik für UI/Agent.
@@ -46,13 +48,15 @@ pub fn import_summary(r: &ImportResult) -> serde_json::Value {
     })
 }
 
-pub fn register_import_tools(reg: &mut CapabilityRegistry, doc: SharedProjectDoc) {
+pub fn register_import_tools(reg: &mut CapabilityRegistry, doc: SharedProjectDoc, ws: Arc<Workspace>) {
     {
         let d = doc.clone();
+        let w = ws.clone();
         reg.register(
-            ToolSpec::new("import.gltf", "glTF/glB importieren und als aktuelles Projekt laden", json!({ "typ": "object", "felder": { "path": { "typ": "string" } } })),
+            ToolSpec::new("import.gltf", "glTF/glB importieren und als aktuelles Projekt laden (Workspace-intern)", json!({ "typ": "object", "felder": { "path": { "typ": "string" } } })),
             move |args| {
                 let path = args.get("path").and_then(|v| v.as_str()).ok_or("Parameter 'path' fehlt")?;
+                let path = w.resolve(path)?;
                 let r = import_gltf(path).map_err(|e| e.to_string())?;
                 let summary = import_summary(&r);
                 let mut doc = d.lock().map_err(|_| "Projekt-Sperre vergiftet".to_string())?;
@@ -62,10 +66,12 @@ pub fn register_import_tools(reg: &mut CapabilityRegistry, doc: SharedProjectDoc
         );
     }
     {
+        let w = ws;
         reg.register(
-            ToolSpec::new("import.preview", "glTF/glB einlesen und Zähler liefern, ohne das Projekt zu ersetzen", json!({ "typ": "object", "felder": { "path": { "typ": "string" } } })),
+            ToolSpec::new("import.preview", "glTF/glB einlesen und Zähler liefern, ohne das Projekt zu ersetzen (Workspace-intern)", json!({ "typ": "object", "felder": { "path": { "typ": "string" } } })),
             move |args| {
                 let path = args.get("path").and_then(|v| v.as_str()).ok_or("Parameter 'path' fehlt")?;
+                let path = w.resolve(path)?;
                 let r = import_gltf(path).map_err(|e| e.to_string())?;
                 Ok(import_summary(&r))
             },
@@ -120,10 +126,11 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         let path = make_and_export_gltf(&dir);
+        let ws = Arc::new(Workspace::new(&dir));
         let doc = SharedProjectDoc::new(Mutex::new(ProjectDoc::new_empty()));
         let mut reg = CapabilityRegistry::new();
-        register_import_tools(&mut reg, doc.clone());
-        register_project_tools(&mut reg, doc.clone());
+        register_import_tools(&mut reg, doc.clone(), ws.clone());
+        register_project_tools(&mut reg, doc.clone(), ws);
         let res = reg.call("import.gltf", json!({ "path": path })).unwrap();
         assert!(res["ok"].as_bool().unwrap());
         assert!(res["import"]["meshes"].as_u64().unwrap() >= 1);
@@ -140,10 +147,17 @@ mod tests {
 
     #[test]
     fn fehlende_datei_fehler() {
+        let dir = std::env::temp_dir().join(format!("re_imp3_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
         let doc = SharedProjectDoc::new(Mutex::new(ProjectDoc::new_empty()));
         let mut reg = CapabilityRegistry::new();
-        register_import_tools(&mut reg, doc.clone());
-        assert!(reg.call("import.gltf", json!({ "path": "/nope/nope.gltf" })).is_err());
-        assert!(reg.call("import.preview", json!({ "path": "/nope/nope.gltf" })).is_err());
+        register_import_tools(&mut reg, doc.clone(), Arc::new(Workspace::new(&dir)));
+        assert!(reg.call("import.gltf", json!({ "path": "nope.gltf" })).is_err());
+        assert!(reg.call("import.preview", json!({ "path": "nope.gltf" })).is_err());
+        // Ausbruch aus dem Workspace, bevor überhaupt gelesen wird.
+        assert!(reg.call("import.preview", json!({ "path": "/etc/passwd" })).is_err());
+        assert!(reg.call("import.gltf", json!({ "path": "../../geheim.gltf" })).is_err());
+        let _ = fs::remove_dir_all(&dir);
     }
 }

@@ -17,6 +17,7 @@ use serde_json::Value;
 
 use crate::outliner::SharedWorld;
 use crate::project::ProjectDoc;
+use crate::workspace::Workspace;
 use crate::{
     register_editor_tools, register_import_tools, register_outliner_tools, register_project_tools,
     register_undo_tools, CommandStack, ComponentRegistry, EditorState, Name, SharedCommandStack,
@@ -33,6 +34,7 @@ pub struct EditorContext {
     pub project: SharedProjectDoc,
     pub world: SharedWorld,
     pub registry: SharedRegistry,
+    pub workspace: Arc<Workspace>,
     pub capabilities: CapabilityRegistry,
 }
 
@@ -53,13 +55,14 @@ impl EditorContext {
         let registry: SharedRegistry = Arc::new(reg);
 
         let mut capabilities = CapabilityRegistry::new();
+        let workspace = Arc::new(Workspace::from_env_or_cwd());
         register_editor_tools(&mut capabilities, state.clone());
         register_undo_tools(&mut capabilities, state.clone(), undo.clone());
-        register_project_tools(&mut capabilities, project.clone());
-        register_import_tools(&mut capabilities, project.clone());
+        register_project_tools(&mut capabilities, project.clone(), workspace.clone());
+        register_import_tools(&mut capabilities, project.clone(), workspace.clone());
         register_outliner_tools(&mut capabilities, world.clone(), registry.clone());
 
-        Self { state, undo, project, world, registry, capabilities }
+        Self { state, undo, project, world, registry, workspace, capabilities }
     }
 
     /// Ist eine Fähigkeit registriert?

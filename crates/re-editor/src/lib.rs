@@ -16,6 +16,7 @@ pub mod import;
 pub mod outliner;
 pub mod project;
 pub mod undo;
+pub mod workspace;
 
 pub use context::EditorContext;
 pub use import::{ImportResult, import_gltf, import_summary, register_import_tools};
@@ -23,6 +24,7 @@ pub use outliner::{
     ComponentRegistry, Name, Outliner, SharedRegistry, Visible, register_outliner_tools,
 };
 pub use project::{ProjectDoc, SharedProjectDoc, register_project_tools};
+pub use workspace::Workspace;
 pub use undo::{
     Command, CommandStack, SetCameraCommand, SetSelectionCommand, SetViewModeCommand,
     SharedCommandStack, register_undo_tools,

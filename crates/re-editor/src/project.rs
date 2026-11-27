@@ -9,6 +9,8 @@ use re_core::project::Project;
 use re_agent::capability::{CapabilityRegistry, ToolSpec};
 use serde_json::json;
 
+use crate::workspace::Workspace;
+
 /// Dokument-Wrapper um ein `Project` mit Pfad und Dirty-Flag.
 #[derive(Clone)]
 pub struct ProjectDoc {
@@ -82,7 +84,7 @@ fn lock(doc: &SharedProjectDoc) -> Result<MutexGuard<'_, ProjectDoc>, String> {
     doc.lock().map_err(|_| "Projekt-Sperre vergiftet".to_string())
 }
 
-pub fn register_project_tools(reg: &mut CapabilityRegistry, doc: SharedProjectDoc) {
+pub fn register_project_tools(reg: &mut CapabilityRegistry, doc: SharedProjectDoc, ws: Arc<Workspace>) {
     {
         let d = doc.clone();
         reg.register(
@@ -99,10 +101,12 @@ pub fn register_project_tools(reg: &mut CapabilityRegistry, doc: SharedProjectDo
     }
     {
         let d = doc.clone();
+        let w = ws.clone();
         reg.register(
-            ToolSpec::new("project.load", "Projekt aus Datei laden", json!({ "typ": "object", "felder": { "path": { "typ": "string" } } })),
+            ToolSpec::new("project.load", "Projekt aus Datei laden (innerhalb des Workspace)", json!({ "typ": "object", "felder": { "path": { "typ": "string" } } })),
             move |args| {
                 let path = args.get("path").and_then(|v| v.as_str()).ok_or("Parameter 'path' fehlt")?;
+                let path = w.resolve(path)?;
                 let loaded = ProjectDoc::load(path).map_err(|e| e.to_string())?;
                 let mut doc = lock(&d)?;
                 *doc = loaded;
@@ -112,10 +116,11 @@ pub fn register_project_tools(reg: &mut CapabilityRegistry, doc: SharedProjectDo
     }
     {
         let d = doc.clone();
+        let w = ws.clone();
         reg.register(
-            ToolSpec::new("project.save", "Projekt speichern (Pfad optional, sonst zuletzt geladener)", json!({ "typ": "object", "felder": { "path": { "typ": "string" } } })),
+            ToolSpec::new("project.save", "Projekt speichern (Pfad optional, sonst zuletzt geladener; Workspace-intern)", json!({ "typ": "object", "felder": { "path": { "typ": "string" } } })),
             move |args| {
-                let p = args.get("path").and_then(|v| v.as_str()).map(PathBuf::from);
+                let p = args.get("path").and_then(|v| v.as_str()).map(|raw| w.resolve(raw)).transpose()?;
                 let mut doc = lock(&d)?;
                 let target = doc.save(p.as_deref()).map_err(|e| e.to_string())?;
                 Ok(json!({ "ok": true, "pfad": target }))
@@ -158,7 +163,7 @@ mod tests {
     fn neu_und_info() {
         let doc = SharedProjectDoc::new(Mutex::new(ProjectDoc::new_empty()));
         let mut reg = CapabilityRegistry::new();
-        register_project_tools(&mut reg, doc.clone());
+        register_project_tools(&mut reg, doc.clone(), Arc::new(Workspace::from_env_or_cwd()));
         assert!(!reg.call("project.info", json!({})).unwrap()["geladen"].as_bool().unwrap());
         reg.call("project.new", json!({ "name": "Demo" })).unwrap();
         let info = reg.call("project.info", json!({})).unwrap();
@@ -169,21 +174,26 @@ mod tests {
 
     #[test]
     fn save_und_load_roundtrip() {
-        let dir = std::env::temp_dir().join("re_editor_proj_test");
+        let dir = std::env::temp_dir().join(format!("re_editor_proj_{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         let path = dir.join("demo.wbproj");
 
+        let ws = Arc::new(Workspace::new(&dir));
         let doc = SharedProjectDoc::new(Mutex::new(ProjectDoc::new_empty()));
         let mut reg = CapabilityRegistry::new();
-        register_project_tools(&mut reg, doc.clone());
+        register_project_tools(&mut reg, doc.clone(), ws.clone());
         reg.call("project.new", json!({ "name": "Roundtrip" })).unwrap();
-        reg.call("project.save", json!({ "path": path })).unwrap();
+        reg.call("project.save", json!({ "path": "demo.wbproj" })).unwrap();
+        // Ausbruch aus dem Workspace: abgelehnt, bevor etwas geschrieben wird.
+        assert!(reg.call("project.save", json!({ "path": "../../entkommen.wbproj" })).is_err());
+        assert!(reg.call("project.save", json!({ "path": "/tmp/entkommen.wbproj" })).is_err());
+        assert!(!std::path::Path::new("/tmp/entkommen.wbproj").exists());
 
         // Neues Dokument, dann laden.
         let doc2 = SharedProjectDoc::new(Mutex::new(ProjectDoc::new_empty()));
         let mut reg2 = CapabilityRegistry::new();
-        register_project_tools(&mut reg2, doc2.clone());
+        register_project_tools(&mut reg2, doc2.clone(), ws);
         reg2.call("project.load", json!({ "path": path })).unwrap();
         let info = reg2.call("project.info", json!({})).unwrap();
         assert_eq!(info["name"], json!("Roundtrip"));
@@ -197,7 +207,7 @@ mod tests {
     fn close_leert_das_dokument() {
         let doc = SharedProjectDoc::new(Mutex::new(ProjectDoc::new_named("X")));
         let mut reg = CapabilityRegistry::new();
-        register_project_tools(&mut reg, doc.clone());
+        register_project_tools(&mut reg, doc.clone(), Arc::new(Workspace::from_env_or_cwd()));
         assert!(reg.call("project.info", json!({})).unwrap()["geladen"].as_bool().unwrap());
         reg.call("project.close", json!({})).unwrap();
         assert!(!reg.call("project.info", json!({})).unwrap()["geladen"].as_bool().unwrap());
@@ -205,10 +215,15 @@ mod tests {
 
     #[test]
     fn load_fehlender_pfad_fehler() {
+        let dir = std::env::temp_dir().join(format!("re_editor_proj_err_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
         let doc = SharedProjectDoc::new(Mutex::new(ProjectDoc::new_empty()));
         let mut reg = CapabilityRegistry::new();
-        register_project_tools(&mut reg, doc.clone());
-        assert!(reg.call("project.load", json!({ "path": "/does/not/exist.wbproj" })).is_err());
+        register_project_tools(&mut reg, doc.clone(), Arc::new(Workspace::new(&dir)));
+        assert!(reg.call("project.load", json!({ "path": "gibt-es-nicht.wbproj" })).is_err());
+        assert!(reg.call("project.load", json!({ "path": "/etc/passwd" })).is_err());
         assert!(reg.call("project.save", json!({})).is_err()); // kein Pfad
+        let _ = fs::remove_dir_all(&dir);
     }
 }

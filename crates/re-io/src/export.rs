@@ -371,8 +371,17 @@ impl Exporter {
 
     /// Load an image file and create a glTF texture. Returns the texture index.
     fn load_texture(&mut self, path: &str) -> Option<usize> {
+        // Security: texture references come from project data (a loaded
+        // .wbproj may be untrusted). Only plain relative paths are allowed -
+        // absolute paths and `..` components could smuggle any file on disk
+        // into the exported .glb.
+        let rel = Path::new(path);
+        if rel.is_absolute() || rel.components().any(|c| matches!(c, std::path::Component::ParentDir))
+        {
+            return None;
+        }
         // Resolve path relative to the export file's parent directory.
-        let full_path = self.export_dir.join(path);
+        let full_path = self.export_dir.join(rel);
         let data = std::fs::read(&full_path).ok()?;
         let mime = if path.to_lowercase().ends_with(".png") {
             "image/png"
