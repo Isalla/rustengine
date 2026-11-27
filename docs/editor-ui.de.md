@@ -55,34 +55,39 @@ kein ausgeliefertes Asset).
 | `plugins.png` | Plugin-Browser: Sidebar mit Zählern, Zeilen mit Checkbox/Icon/Badge/Version |
 | `…_Aussehen_Dunkel.json` | **exakte UE5-Theme-Farben** (`EStyleColor::*`, lineares RGBA) — das `ue5`-Theme startet mit diesen Werten |
 | `EditorPerProjectUserSettings.ini`, `Editor Settings Backup….ini`, `Project Settings Backup….ini` | echte Editor-Metriken, Shortcut-Belegungen, Dock-Layout — Quelle für Abstände/Größen |
+| `UE5_11.png` | Inhaltsbrowser geöffnet (Raster-Ansicht): Sidebar-Baum (Favoriten/Alle/Sammlungen), Kollektions-Leiste, Brotkrumen, Asset-Werkzeugleiste, Ansichtsumschalter, Auswahle-Statusleiste; Outliner mit echtem Baum (Sichtbarkeits-Augen, Namenssuche, Filter-Knopf, Spaltenkopf, untere Level-Tabs) |
+| `UE5_12_outputlog.png` | Output-Log ausgeklappt: farbige Zeilen (Warnung gelb, Fehler rot, Info weiß), Kategorie-Filter-Dropdown, „Enthaltungen anzeigen"-Checkbox, Suchfeld, Kopieren/Leeren-Icons |
+| `UE5_13.png` | Inhaltsbrowser Listen-Ansicht-Umschalter + Asset-Hover-Tooltip (Vorschau + Metadaten-Karte) |
+| `UE5_14.png` | Inhaltsbrowser-Dateiliste mit **Inline-Umbenennung** (Textfeld in Bearbeitung, Auswahlhervorhebung) und status-gefärbten Zeilen |
+| `UE5_15.png` | Rechtsklick-**Kontext-Menü** im Viewport: Suchfeld, Kleinkapett-Sektions-Labels, Shortcut-Spalte, Häkchen-Einträge, deaktivierte Einträge, Untermenü-Pfeile |
+| `UE5_16.png` | **Akteure platzieren**-Panel: Klassen-Suche, Kategorie-Liste, link Icon-Schiene mit Flyout, Panel-Schließen-Knopf |
+| `UE5_17.png` | geöffnetes Toolbar-Dropdown (Anzeigemodus) + weißer Hover-Tooltip |
+| `UE5_18.png` | Kontext-Menü des Viewport-Tabs (Häkchen, deaktivierte Einträge, Sektions-Labels) |
+| `Bewegungseditor*.png` | Sequencer-Referenz für M11: Spur-Ansicht (Lineal, Playhead, Key-Rauten, Kamera-Spur), Icon-Schiene mit Icon+Text-Flyout-Rastern (ausgewählt = blau), modale Message-Box („NumLock aktiviert") |
 
 Bewiesene Interaktions-Zustände: Hover/ausgewählt (blau), deaktiviert
 (grau), Tooltip (weiße Box), Untermenü-Pfeil, Separatoren mit
 Kleinkapett-Labels, Textkürzung mit Ellipse, dünne Scrollbars,
-Tab-Schließen-Knopf, Menü-Suchfeld.
+Tab-Schließen-Knopf, Menü-Suchfeld, Kontextmenü-Suche, Inline-
+Textbearbeitung mit Auswahl, Häkchen-Menüpunkte, farbige Log-Zeilen,
+Asset-Hover-Karten, modale Message-Box.
 
 ## 4. Lücken — im Referenz-Satz noch fehlt
 
-Nach Priorität; das Toolkit kann ohne sie starten, die `ue5`-Preset-
-Feinarbeit nicht fertig werden ohne den ersten Block:
+Der gelieferte Satz deckt jetzt alle Kern-Widgets. Was bleibt, ist
+Feinarbeit; Toolkit und `ue5`-Preset können beide weitermachen:
 
-1. **Inhaltsbrowser** geöffnet — Raster-Ansicht, Listen-Ansicht,
-   Sidebar-Baum, Kollektions-Leiste (nur sein Tab-Knopf ist gezeigt).
-2. **Output-Log** ausgeklappt — farbige Zeilen, Filter-Dropdown, Suche.
-3. **Kontext-Menüs** — Rechtsklick in Viewport, Outliner,
-   Inhaltsbrowser und auf einer Details-Eigenschaft.
-4. **Toolbar-Dropdowns geöffnet** — Anzeigemodus (Beleuchtet),
-   Perspektive, Anzeigen (Auge), Produktionen, Kamera-Tempo.
-5. **Actors platzieren**-Panel.
-6. **Details-Interaktions-Zustände** — offenes Enum-Dropdown,
-   Farb-Picker, Textfeld in Bearbeitung (Caret), Wert-Drag,
-   Reset-Icon-Hover.
-7. **Konsole / Command-Palette** mit Autovervollständigungs-Liste.
-8. **Schwebendes Panel + Dock-Drop-Hinweise** — abgetrennter
-   Titelbalken, Tab-Zieh-Ghost, Drop-Ziel-Linien.
-9. **Message-Box** (Ja/Nein/Abbrechen) und ein Fortschritts-Dialog.
-10. **Content-Drawer ausgeklappt** (geöffnetes Regal).
-11. Play-Mode-Overlay im Viewport (optional).
+1. **Konsole / Command-Palette** mit Autovervollständigungs-Liste.
+2. **Schwebendes Panel + Dock-Drop-Hinweise** — abgetrennter
+   Titelbalken, Tab-Zieh-Ghost, Drop-Ziel-Linien (UE5_16 zeigt ein
+   gedocktes Tab-Panel, keinen Schweb-Zieh-Zustand).
+3. **Content-Drawer ausgeklappt** (geöffnetes unteres Regal).
+4. **Details-Interaktions-Zustände** — offenes Enum-Dropdown,
+   Farb-Picker, Wert-Drag, Reset-Icon-Hover (Inline-Umbenennung ist
+   jetzt durch `UE5_14` abgedeckt).
+5. **Fortschritts-Dialog** (die modale Message-Box deckt das
+   Bewegungseditor-Bild ab).
+6. Play-Mode-Overlay im Viewport (optional).
 
 Icons: die Screenshots zeigen Menü-Icons zu klein für Vektor-Extraktion.
 Nach ADR-0001 ist Icon-Treue Art-Arbeit im Theme — das Toolkit liefert

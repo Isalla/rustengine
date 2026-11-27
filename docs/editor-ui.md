@@ -54,33 +54,39 @@ material, not a shipped asset).
 | `plugins.png` | plugin browser: sidebar with counts, rows with checkbox/icon/badge/version |
 | `…_Aussehen_Dunkel.json` | **exact UE5 theme colors** (`EStyleColor::*`, linear RGBA) — the `ue5` theme file seeds from these |
 | `EditorPerProjectUserSettings.ini`, `Editor Settings Backup….ini`, `Project Settings Backup….ini` | real editor metrics, shortcut maps, dock layout — source for spacing/sizes |
+| `UE5_11.png` | Content Browser opened (grid view): sidebar tree (Favoriten/Alle/Sammlungen), collection bar, breadcrumbs, asset toolbar, view toggles, selection status bar; Outliner with a real tree (eye visibility icons, name search, filter button, column header, bottom level tabs) |
+| `UE5_12_outputlog.png` | Output Log expanded: colored lines (warning yellow, error red, info white), category filter dropdown, "Enthaltungen anzeigen" checkbox, search field, copy/clear icons |
+| `UE5_13.png` | Content Browser list-view toggle + asset hover tooltip (thumbnail + metadata card) |
+| `UE5_14.png` | Content Browser file list with **inline rename** (text field in edit, selection highlight) and status-colored rows |
+| `UE5_15.png` | Viewport right-click **context menu**: search field, small-caps section labels, shortcut column, checkmark items, disabled items, submenu arrows |
+| `UE5_16.png` | **Place Actors** panel: class search, category list, left icon rail with flyout, panel close button |
+| `UE5_17.png` | opened toolbar dropdown (view mode) + white hover tooltip |
+| `UE5_18.png` | viewport-tab context menu (checkmarks, disabled entries, section labels) |
+| `Bewegungseditor*.png` | sequencer reference for M11: track view (ruler, playhead, key diamonds, camera track), tool rail with icon+text flyout grids (selected = blue), modal message box ("NumLock aktiviert") |
 
-Interaction states the set already proves: hover/selected (blue),
+Interaction states the set now proves: hover/selected (blue),
 disabled (gray), tooltip (white box), submenu arrow, section
 separators with small-caps labels, text truncation with ellipsis,
-thin scrollbars, tab close button, menu search field.
+thin scrollbars, tab close button, menu search field, context-menu
+search, inline text edit with selection, checkmark menu items,
+colored log lines, asset hover cards, modal message box.
 
 ## 4. Gaps — still missing from the reference set
 
-Priority order; the toolkit can start without them, the `ue5` preset
-polish cannot finish without the first block:
+The delivered set now covers every core widget. What remains is
+polish detail; the toolkit and the `ue5` preset can both proceed:
 
-1. **Content Browser** opened — grid view, list view, sidebar tree,
-   collection bar (only its tab button is shown).
-2. **Output Log** expanded — colored lines, filter dropdown, search.
-3. **Context menus** — right-click in viewport, outliner, content
-   browser, and on a details property.
-4. **Toolbar dropdowns opened** — view mode (Beleuchtet), Perspektive,
-   Show (eye), Produktionen, camera speed.
-5. **Place Actors** panel (Actors platzieren).
-6. **Details interaction states** — open enum dropdown, color picker,
-   text field in edit (caret), value drag, reset-icon hover.
-7. **Console / command palette** with autocomplete list.
-8. **Floating panel + dock drop hints** — detached title bar, tab drag
-   ghost, drop-target lines.
-9. **Message box** (Yes/No/Cancel) and a progress dialog.
-10. **Content Drawer expanded** (the shelf opened).
-11. Play-mode overlay in the viewport (optional).
+1. **Console / command palette** with autocomplete list.
+2. **Floating panel + dock drop hints** — detached title bar, tab drag
+   ghost, drop-target lines (UE5_16 shows a docked tabified panel,
+   not a floating drag state).
+3. **Content Drawer expanded** (the bottom shelf opened).
+4. **Details interaction states** — open enum dropdown, color picker,
+   value drag, reset-icon hover (inline rename is now covered by
+   `UE5_14`).
+5. **Progress dialog** (the modal message box is covered by the
+   Bewegungseditor shot).
+6. Play-mode overlay in the viewport (optional).
 
 Icons: the screenshots show menu icons too small to extract as
 vectors. Per ADR-0001 icon fidelity is art effort carried by the
