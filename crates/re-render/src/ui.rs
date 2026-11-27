@@ -18,6 +18,11 @@
 //! - [`FontAtlas`] — Glyphen-Rasterung (ab_glyph) in ein R8-Atlas mit
 //!   Shelf-Packer; [`FontAtlas::text`] legt einen String als Vertex-
 //!   Liste aus.
+//! - [`widgets`] — Immediate-Mode-Widgets auf der Draw-List (Button,
+//!   Zeile, Tab, Sektionskopf, Scroll, Textfeld): Eingabe als Daten,
+//!   Ereignisse als Rückgaben, Look nur aus dem Theme.
+
+pub mod widgets;
 
 use ab_glyph::{Font, ScaleFont};
 use serde::{Deserialize, Serialize};
@@ -609,6 +614,36 @@ impl FontAtlas {
 
     pub fn glyph(&self, font: usize, ch: char) -> Option<Glyph> {
         self.entries.get(&(font, ch)).copied()
+    }
+
+    /// Anzahl der Schriften im Atlas (Font-Index = Reihenfolge in
+    /// [`Self::build`]; 0 = Regular, 1 = Bold, wenn mitgeliefert).
+    pub fn font_count(&self) -> usize {
+        self.ascents.len()
+    }
+
+    /// Misst einen Text ohne zu zeichnen — dieselbe Pen-Logik wie
+    /// [`Self::text`] (unbekannte Zeichen übersprungen, `\n` bricht die
+    /// Zeile), Rückgabe (w, h).
+    pub fn measure(&self, font: usize, text: &str, line_h: f32) -> [f32; 2] {
+        let ascent = self.ascents[font];
+        let descent = self.descents[font];
+        let mut pen_x = 0.0f32;
+        let mut pen_y = 0.0f32;
+        let mut max_w = 0.0f32;
+        for ch in text.chars() {
+            if ch == '\n' {
+                max_w = max_w.max(pen_x);
+                pen_x = 0.0;
+                pen_y += line_h;
+                continue;
+            }
+            let Some(g) = self.glyph(font, ch) else { continue };
+            pen_x += g.advance;
+        }
+        max_w = max_w.max(pen_x);
+        // descent ist negativ → Höhe = ascent - descent.
+        [max_w, pen_y + ascent - descent]
     }
 
     /// Bilinear abgetastete Abdeckung (0..1) bei normalisierten
