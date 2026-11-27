@@ -117,3 +117,34 @@ replace them later without code changes.
   inspector right, console bottom, assistant dock.
 - Every control binds a capability name (`EditorContext::call`) —
   never engine internals (double addressability).
+
+## 6. Raster conventions (the CPU core is the truth, the GPU mirrors it)
+
+The UI draws through one draw-list (`re_render::ui::DrawList`); the
+CPU reference rasterizer (`rasterize`) and the GPU pass
+(`re_wgpu::ui::UiGpu`, shader `ui.wgsl`) must produce the same pixels —
+same doctrine as the shadow core. `tests/ui_gpu.rs` gates this: a
+representative scene (fills, snapped lines, nested clips to the edge,
+overlapping alpha blends, two-font glyph text with umlauts and
+em-dash) diffs at **max 1/255 per channel, zero pixels beyond** (the
+1 LSB is RGBA16F intermediate storage; the gate allows exactly that).
+
+The shared conventions that make the mirror exact:
+
+- **Pixel-snapped geometry**: glyph quads snap to the integer pixel
+  grid at layout time (pen stays fractional, quad edges do not). All
+  edges are then integers, pixel centers (x.5) never land on an edge,
+  and no rasterizer's subpixel quantization can flip a coverage
+  column. Glyph sampling becomes 1:1 — each target pixel hits exactly
+  one atlas texel, bilinear degenerates to a texel read.
+- **Integer scissor**: `scissor_rect()` floors/ceils the float clip to
+  a pixel box; the CPU rasterizer and `set_scissor_rect` consume the
+  same box.
+- **Manual bilinear on the GPU**: the shader filters the atlas with
+  `textureLoad` in the CPU's exact operation order — hardware filter
+  weights are fixed-point and would diverge by LSBs.
+- **Linear float accumulation**: the GPU renders to RGBA16F (premultiplied
+  `ONE, ONE_MINUS_SRC_ALPHA` == the CPU blend formula) and quantizes
+  to 8 bits only after readback, like the CPU reference does.
+- Text colors are linear RGBA; the window path composites onto the
+  scene after tone-mapping (the UI pass itself never sRGB-encodes).

@@ -27,7 +27,7 @@ use crate::{pod_bytes, pod_vec_bytes, CamUni, Inner, MeshGpu, Vtx, LIGHT_DIR};
 /// IEEE-754-Half (16 Bit) → f32-Bits. Bewusst von Hand statt `f16` —
 /// das ist im aktuellen Toolchain noch instabil, und der Readback-Pfad
 /// muss auf jeder Rust-Version bauen, auf der die Engine laeuft.
-fn half_to_f32_bits(h: u16) -> u32 {
+pub(crate) fn half_to_f32_bits(h: u16) -> u32 {
     let sign = ((h >> 15) & 1) as u32;
     let exp = ((h >> 10) & 0x1F) as u32;
     let man = (h & 0x3FF) as u32;

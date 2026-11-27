@@ -342,12 +342,17 @@ impl DrawList {
         self.rect(Rect::new(r.right() - w, r.y, w, r.h), color);
     }
 
-    /// Horizontale oder vertikale Linie mit Dicke.
+    /// Horizontale oder vertikale Linie mit Dicke — auf das Pixelraster
+    /// gerastert (Kanten ganzzahlig), damit CPU-Referenz und
+    /// Hardware-Rasterizer nie um eine Zeile divergieren. Eine 1px-Linie
+    /// bei y=28 trifft die Zeile 28.
     pub fn line(&mut self, x0: f32, y0: f32, x1: f32, y1: f32, w: f32, color: Rgba) {
         if (y0 - y1).abs() <= w {
-            self.rect(Rect::new(x0.min(x1), y0 - w * 0.5, (x1 - x0).abs(), w), color);
+            let top = (y0 - w * 0.5).round();
+            self.rect(Rect::new(x0.min(x1), top, (x1 - x0).abs(), w.max(1.0)), color);
         } else {
-            self.rect(Rect::new(x0 - w * 0.5, y0.min(y1), w, (y1 - y0).abs()), color);
+            let left = (x0 - w * 0.5).round();
+            self.rect(Rect::new(left, y0.min(y1), w.max(1.0), (y1 - y0).abs()), color);
         }
     }
 
@@ -382,8 +387,22 @@ impl DrawList {
 
 // ── CPU-Rasterizer (Referenz für den GPU-UI-Pass) ────────────────────
 
+/// Integer-Scissor (x, y, w, h) eines Clip-Rechtecks — dieselbe Regel,
+/// die der GPU-Pass als `set_scissor_rect` verwendet: ein Pixel `p`
+/// gehört dazu, wenn `floor(clip) <= p < ceil(clip-Kante)` (Achse für
+/// Achse). CPU-Referenz und Hardware teilen sich diese Konvention,
+/// damit der Pixel-Diff exakt wird.
+pub fn scissor_rect(clip: &Rect) -> (u32, u32, u32, u32) {
+    let x0 = clip.x.max(0.0).floor() as u32;
+    let y0 = clip.y.max(0.0).floor() as u32;
+    let x1 = clip.right().max(0.0).ceil() as u32;
+    let y1 = clip.bottom().max(0.0).ceil() as u32;
+    (x0, y0, x1.saturating_sub(x0), y1.saturating_sub(y0))
+}
+
 /// Malt eine Draw-List in ein RGBA8-Bild (linear gerechnet, am Ende
-/// quantisiert). Achsenparallele Quads, Scissor über Pixelzentren,
+/// quantisiert). Achsenparallele Quads, Scissor nach `scissor_rect`
+/// (Pixel-Ganzzahl-Mitgliedschaft — identisch zum GPU-`set_scissor_rect`),
 /// Alpha-Blending in linearer RGBA, Atlas-Abdeckung bilinear — exakt
 /// die Konvention, die der Hardware-Filter des GPU-Passes spiegeln
 /// muss. Deterministisch; dieselbe Doctrine wie beim Schatten-Kern:
@@ -392,6 +411,10 @@ pub fn rasterize(dl: &DrawList, atlas: Option<&FontAtlas>, w: u32, h: u32, clear
     let n = (w * h) as usize;
     let mut buf: Vec<Rgba> = vec![clear; n];
     for cmd in dl.cmds() {
+        let (sx, sy, sw, sh) = scissor_rect(&cmd.clip);
+        if sw == 0 || sh == 0 {
+            continue;
+        }
         for quad in cmd.vertices.chunks_exact(6) {
             // quad[0] = linke obere Ecke, quad[2] = rechte untere.
             let (x0, y0) = (quad[0].pos[0], quad[0].pos[1]);
@@ -404,19 +427,15 @@ pub fn rasterize(dl: &DrawList, atlas: Option<&FontAtlas>, w: u32, h: u32, clear
             let (u0, v0) = (quad[0].uv[0], quad[0].uv[1]);
             let (u1, v1) = (quad[2].uv[0], quad[2].uv[1]);
             let color = quad[0].color;
-            let clip = &cmd.clip;
-            let px0 = (rx0.floor().max(0.0)) as u32;
-            let py0 = (ry0.floor().max(0.0)) as u32;
-            let px1 = (rx1.ceil().min(w as f32) as u32).max(px0);
-            let py1 = (ry1.ceil().min(h as f32) as u32).max(py0);
+            let px0 = (rx0.floor().max(sx as f32)) as u32;
+            let py0 = (ry0.floor().max(sy as f32)) as u32;
+            let px1 = (rx1.ceil().min((sx + sw) as f32).min(w as f32) as u32).max(px0);
+            let py1 = (ry1.ceil().min((sy + sh) as f32).min(h as f32) as u32).max(py0);
             for py in py0..py1 {
                 for px in px0..px1 {
                     let pcx = px as f32 + 0.5;
                     let pcy = py as f32 + 0.5;
                     if pcx < rx0 || pcx >= rx1 || pcy < ry0 || pcy >= ry1 {
-                        continue;
-                    }
-                    if !clip.contains(pcx, pcy) {
                         continue;
                     }
                     let cov = if cmd.textured {
@@ -631,7 +650,17 @@ impl FontAtlas {
             let Some(g) = self.glyph(font, ch) else { continue };
             if g.size[0] > 0.0 && g.size[1] > 0.0 {
                 let baseline = pen_y + ascent;
-                let r = Rect::new(pen_x + g.offset[0], baseline + g.offset[1], g.size[0], g.size[1]);
+                // Pixel-Snapping: die Glyphenfläche rastet auf das
+                // Ganzzahl-Pixelraster ein. Damit liegen alle Quad-Kanten
+                // auf ganzzahligen Koordinaten (Pixelzentren .5 treffen
+                // nie eine Kante — CPU-Fill-Rule und Hardware-Rasterizer
+                // können nicht divergieren), und die UV-Abtastung wird
+                // 1:1: jedes Ziel-Pixel trifft exakt ein Atlas-Texel
+                // (fx ganzzahlig → bilinear degeneriert zum Texelwert).
+                // Der Pen bleibt fraktional, die Schrift läuft nicht weg.
+                let gx = (pen_x + g.offset[0]).round();
+                let gy = (baseline + g.offset[1]).round();
+                let r = Rect::new(gx, gy, g.size[0], g.size[1]);
                 // UV = exakt die Texel der Glyphenfläche; der 1px-Rand
                 // im Atlas schützt beim linearen Filtern vor Bluten.
                 let uv = g.uv;

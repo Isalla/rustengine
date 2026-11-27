@@ -77,6 +77,6 @@ pub use shadow::{
 };
 pub use temporal::{History, RgbBox, Taa};
 pub use ui::{
-    dock_layout, rasterize, DrawCmd, DrawList, DockNode, FontAtlas, Glyph, PanelPlacement, Rect,
-    Theme, ThemeColors, ThemeMetrics, UiError, UiVertex, ASCII_CHARS,
+    dock_layout, rasterize, scissor_rect, DrawCmd, DrawList, DockNode, FontAtlas, Glyph,
+    PanelPlacement, Rect, Rgba, Theme, ThemeColors, ThemeMetrics, UiError, UiVertex, ASCII_CHARS,
 };

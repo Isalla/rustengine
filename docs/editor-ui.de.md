@@ -121,3 +121,37 @@ Code-Änderung ersetzen.
   Inspector rechts, Konsole unten, Assistent-Dock.
 - Jedes Control bindet einen Capability-Namen (`EditorContext::call`) —
   niemals Engine-Interna (doppelte Adressierbarkeit).
+
+## 6. Raster-Konventionen (der CPU-Kern ist die Wahrheit, die GPU spiegelt)
+
+Das UI zeichnet durch genau eine Draw-List (`re_render::ui::DrawList`);
+der CPU-Referenz-Rasterizer (`rasterize`) und der GPU-Pass
+(`re_wgpu::ui::UiGpu`, Shader `ui.wgsl`) müssen dieselben Pixel
+erzeugen — dieselbe Doctrine wie beim Schatten-Kern. `tests/ui_gpu.rs`
+ist das Tor: eine repräsentative Szene (Flächen, gesnapste Linien,
+verschachtelte Clips bis an den Rand, überlappendes Alpha-Blending,
+Glyphen-Text zweier Fonts mit Umlauten und Geviertstrich) difft bei
+**max 1/255 je Kanal, kein Pixel darüber** (das 1 LSB ist die
+RGBA16F-Zwischenspeicherung; genau das erlaubt das Tor).
+
+Die geteilten Konventionen, die den Spiegel exakt machen:
+
+- **Pixelgesnapste Geometrie**: Glyphen-Quads rasten beim Layouten auf
+  das Ganzzahl-Pixelraster ein (der Pen bleibt fraktional, die
+  Quad-Kanten nicht). Alle Kanten sind ganzzahlig, Pixelzentren (x.5)
+  treffen nie eine Kante, und keine Subpixel-Quantisierung eines
+  Rasterizers kann eine Abdeckungs-Spalte kippen. Die Glyphen-
+  Abtastung wird 1:1 — jedes Ziel-Pixel trifft genau ein Atlas-Texel,
+  das Bilinear degeneriert zum Texelwert.
+- **Integer-Scissor**: `scissor_rect()` klemmt den Float-Clip auf ein
+  Pixel-Box (floor/ceil); CPU-Rasterizer und `set_scissor_rect`
+  verbrauchen dieselbe Box.
+- **Manuelles Bilinear auf der GPU**: der Shader filtert den Atlas per
+  `textureLoad` in exakt der Operationsreihenfolge des CPU-Kerns —
+  Hardware-Filtergewichte sind festkomma und würden um LSBs divergieren.
+- **Linearer Float-Akkumulation**: die GPU rendert in RGBA16F
+  (premultipliziertes `ONE, ONE_MINUS_SRC_ALPHA` == die CPU-Blend-
+  Formel) und quantisiert erst nach dem Readback auf 8 Bit — wie die
+  CPU-Referenz.
+- Textfarben sind lineares RGBA; der Fenster-Pfad kompositt das UI nach
+  dem Tone-Mapping auf die Szene (der UI-Pass selbst kodiert nie sRGB).

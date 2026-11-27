@@ -25,6 +25,7 @@ use re_core::mesh::Mesh;
 use re_render::{Camera, DrawBatch, GfxBackend, GfxError};
 
 pub mod deferred;
+pub mod ui;
 
 pub use deferred::{
     CLUSTER_CAP, CLUSTER_SLICES, CLUSTER_TILE, DeferredBatch, DeferredHdr, DeferredLight,
@@ -329,6 +330,8 @@ pub struct WgpuBackend {
     frames: u64,
     /// Deferred-Zustand (M5): lazy in der aktuellen Zielgröße erzeugt.
     deferred: Option<Deferred>,
+    /// UI-Pass-Zustand (M4 P1): Pipelines, lazy für RGBA16F-Ziele.
+    ui: Option<ui::UiGpu>,
     /// Vor `init` gesetztes Fenster-Ziel (Feature `window`).
     #[cfg(feature = "window")]
     window_src: Option<std::sync::Arc<winit::window::Window>>,
@@ -568,6 +571,74 @@ impl WgpuBackend {
         inner.make_target(1280, 720);
         self.inner = Some(inner);
         Ok(())
+    }
+
+    // ---------- UI (M4 P1) ----------
+
+    /// UI-Pass auf ein eigenes RGBA16F-Ziel (linear): malt `dl` über den
+    /// Font-Atlas `atlas` und liefert das Ergebnis quantisiert als RGBA8
+    /// — Byte-layout identisch zu `re_render::rasterize()`, damit der
+    /// Beweis-Test Pixel für Pixel diffen kann. Float-Akkumulation im
+    /// 16F-Ziel spiegelt dabei die float-Akkumulation der CPU-Referenz.
+    pub fn render_ui_offscreen(
+        &mut self,
+        dl: &re_render::ui::DrawList,
+        atlas: &re_render::ui::FontAtlas,
+        w: u32,
+        h: u32,
+        clear: re_render::ui::Rgba,
+    ) -> Result<Vec<u8>, GfxError> {
+        let inner = self
+            .inner
+            .as_ref()
+            .ok_or_else(|| GfxError::Device("init nicht ausgeführt".into()))?;
+        let ui = self
+            .ui
+            .get_or_insert_with(|| ui::UiGpu::new(&inner.device, wgpu::TextureFormat::Rgba16Float));
+        let target = inner.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("ui-target"),
+            size: wgpu::Extent3d {
+                width: w.max(1),
+                height: h.max(1),
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba16Float,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let view = target.create_view(&wgpu::TextureViewDescriptor::default());
+        let gpu_atlas = ui.upload_atlas(&inner.device, &inner.queue, atlas);
+        let mut encoder = inner
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("ui-frame") });
+        ui.render(
+            &inner.device,
+            &inner.queue,
+            &mut encoder,
+            &view,
+            (w.max(1), h.max(1)),
+            dl,
+            Some(&gpu_atlas),
+            clear,
+        )?;
+        inner.queue.submit(std::iter::once(encoder.finish()));
+        // RGBA16F = 8 Byte/Pixel (4 Kanäle à 2 Byte).
+        let raw = readback_texture(&inner.device, &inner.queue, &target, w.max(1), h.max(1), 8)?;
+        // RGBA16F-Rohbytes → f32 → dieselbe 8-Bit-Quantisierung wie die
+        // CPU-Referenz (Klemmen auf 0..1, kaufmännisches Runden).
+        let n = (w.max(1) * h.max(1)) as usize;
+        let mut out = vec![0u8; n * 4];
+        for i in 0..n {
+            for k in 0..4 {
+                let bits = u16::from_le_bytes([raw[i * 8 + k * 2], raw[i * 8 + k * 2 + 1]]);
+                let v = f32::from_bits(deferred::half_to_f32_bits(bits));
+                out[i * 4 + k] = (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+            }
+        }
+        Ok(out)
     }
 
     // ---------- Bild ----------
