@@ -11,3 +11,6 @@ icon.png
 # mdBook-Ausgabe (lokal gebaut; im Repo liegt nur die Markdown-Quelle)
 docs/handbook/*/book/
 _site/
+
+# Persönliche Notizen — niemals ins Repo
+docs/gedanke.txt
