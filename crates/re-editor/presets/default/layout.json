@@ -1,0 +1,65 @@
+{
+  "name": "default",
+  "dock": {
+    "Split": {
+      "vertical": false,
+      "ratio": 0.24,
+      "first": {
+        "Split": {
+          "vertical": true,
+          "ratio": 0.55,
+          "first": { "Leaf": { "panel": "outliner" } },
+          "second": { "Leaf": { "panel": "inspector" } }
+        }
+      },
+      "second": {
+        "Split": {
+          "vertical": true,
+          "ratio": 0.72,
+          "first": { "Leaf": { "panel": "viewport" } },
+          "second": {
+            "Tabs": {
+              "active": 0,
+              "panels": ["console", "assistant"]
+            }
+          }
+        }
+      }
+    }
+  },
+  "menu_bar": [
+    {
+      "id": "menu.file",
+      "items": [
+        { "id": "project.new", "capability": "project.new", "args": { "name": "untitled" } },
+        { "id": "project.save", "capability": "project.save" },
+        { "separator": true },
+        { "id": "project.close", "capability": "project.close" }
+      ]
+    },
+    {
+      "id": "menu.edit",
+      "items": [
+        { "id": "editor.undo", "capability": "editor.undo" },
+        { "id": "editor.redo", "capability": "editor.redo" }
+      ]
+    },
+    {
+      "id": "menu.help",
+      "items": [
+        { "id": "project.info", "capability": "project.info" }
+      ]
+    }
+  ],
+  "toolbar": [
+    { "id": "project.new", "capability": "project.new", "args": { "name": "untitled" } },
+    { "id": "project.save", "capability": "project.save" },
+    { "id": "editor.undo", "capability": "editor.undo" },
+    { "id": "editor.redo", "capability": "editor.redo" }
+  ],
+  "shortcuts": [
+    { "key": "S", "ctrl": true, "capability": "project.save" },
+    { "key": "Z", "ctrl": true, "capability": "editor.undo" },
+    { "key": "Z", "ctrl": true, "shift": true, "capability": "editor.redo" }
+  ]
+}

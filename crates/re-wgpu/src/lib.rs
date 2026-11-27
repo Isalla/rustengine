@@ -312,6 +312,9 @@ struct Inner {
     tex_cache: HashMap<String, (wgpu::Texture, wgpu::TextureView)>,
     /// Billboard-Sheets unter frei gewählter ID (Upload vom Aufrufer).
     sheet_cache: HashMap<u64, (wgpu::Texture, wgpu::TextureView, u32, u32)>,
+    /// UI-Pipelines für den Overlay-Pass aufs Farbziel (M4 P1): Format
+    /// ist das des eigentlichen Ziels, Pipeline lazy beim ersten Overlay.
+    ui_over: Option<ui::UiGpu>,
 }
 
 /// Für den Render-Pass vorbereitete Draw-Ressourcen (alle Handles owned).
@@ -569,6 +572,7 @@ impl WgpuBackend {
             cell_cache: HashMap::new(),
             tex_cache: HashMap::new(),
             sheet_cache: HashMap::new(),
+            ui_over: None,
         };
         inner.make_target(1280, 720);
         self.inner = Some(inner);
@@ -1218,6 +1222,20 @@ impl GfxBackend for WgpuBackend {
     }
 
     fn render(&mut self, camera: &Camera, batches: &[DrawBatch]) -> Result<(), GfxError> {
+        self.render_with_ui(camera, batches, None)
+    }
+}
+
+impl WgpuBackend {
+    /// Szenen-Bild mit optionalem UI-Overlay auf demselben Farbziel
+    /// (M4 P1): erst Szenen-Pass, dann UI-Pass (LoadOp::Load), dann
+    /// wie üblich present. `ui_dl` = Draw-List + Font-Atlas.
+    pub fn render_with_ui(
+        &mut self,
+        camera: &Camera,
+        batches: &[DrawBatch],
+        ui_dl: Option<(&re_render::ui::DrawList, &re_render::ui::FontAtlas)>,
+    ) -> Result<(), GfxError> {
         let inner = self
             .inner
             .as_mut()
@@ -1412,6 +1430,14 @@ impl GfxBackend for WgpuBackend {
                     pass.draw(0..p.n_vertices, 0..1);
                 }
             }
+        }
+        // UI-Overlay (M4 P1): Panels über dasselbe Farbziel malen, ohne
+        // es zu löschen; Pipeline lazy für das Ziel-Format angelegt.
+        if let Some((dl, atlas)) = ui_dl {
+            let (fmt, size) = (inner.format, inner.size);
+            let gpu = inner.ui_over.get_or_insert_with(|| ui::UiGpu::new(&device, fmt));
+            let gpu_atlas = gpu.upload_atlas(&device, &queue, atlas);
+            gpu.render_overlay(&device, &queue, &mut enc, &color_view, size, dl, Some(&gpu_atlas))?;
         }
         queue.submit([enc.finish()]);
         if let Some(st) = frame {

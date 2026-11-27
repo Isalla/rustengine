@@ -85,10 +85,13 @@ mit ehrlichem Haken-Stand. ✅ fertig und testabgedeckt · 🟡 teilweise gebaut
 - [x] Import-Pipeline um `re-io` (`re-editor::import` — `import_gltf`, `import.preview`/`import.gltf`-Capabilities, Roundtrip-Test)
 - [x] Undo/Redo als umkehrbare Systeme (`re-editor::undo` — `Command<T>`-Trait, `CommandStack` mit Cursor, Built-in-Commands für Kamera/Selektion/Ansichtsmodus, `editor.undo/redo/history`-Capabilities)
 - [x] Worldbuilder-Projekt-Loader (`re-editor::project` — `ProjectDoc` mit Pfad/Dirty, `project.new/load/save/close/info`-Capabilities, Roundtrip-Test)
-- [ ] Editor-Frontend P1: Widget-Toolkit (Draw-List, Text-Atlas,
+- [x] Editor-Frontend P1: Widget-Toolkit (Draw-List, Text-Atlas,
       Input-Routing, Docking-Manifest, Theme) + das `default`-Preset mit
-      eigener Identität der Engine — datengetrieben nach ADR-0001; das
-      `ue5`-Preset (P2) folgt später
+      eigener Identität der Engine (`re-render::ui`-Widgets,
+      `re-editor::layout`-Manifest + `presets/default`-Daten,
+      `re-editor::panels` über `EditorContext::call`; Fenster-Overlay via
+      `render_with_ui` + `--ui-png`-CPU-Beweis; datengetrieben nach
+      ADR-0001; das `ue5`-Preset (P2) folgt später
 - [ ] Mehr Dateiformate (Breite statt Einzel-Tool-Migration):
       registrgesteuerte Importierer/Exportierer — FBX (Meshes &
       Animationen), OBJ-Legat und USD (Szenen-Austausch) zusätzlich zum

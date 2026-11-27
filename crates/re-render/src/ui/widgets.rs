@@ -59,6 +59,14 @@ pub struct UiState {
     open: BTreeMap<u64, bool>,
 }
 
+impl UiState {
+    /// Hält gerade ein Widget den Tastatur-Fokus (z. B. ein Textfeld)?
+    /// Der App-Code nutzt das, um Tastatureingaben umzuleiten.
+    pub fn has_focus(&self) -> bool {
+        self.focus.is_some()
+    }
+}
+
 /// Antwort einer Baumzeile.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct TreeResponse {

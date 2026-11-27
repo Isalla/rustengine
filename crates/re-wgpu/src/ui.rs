@@ -262,6 +262,35 @@ impl UiGpu {
         atlas: Option<&UiAtlasGpu>,
         clear: Rgba,
     ) -> Result<(), GfxError> {
+        self.render_impl(device, queue, encoder, target, target_size, dl, atlas, Some(clear))
+    }
+
+    /// Wie [`Self::render`], aber ohne Clear: die Draw-List legt sich über
+    /// das vorhandene Bild (Szene im Fenstermodus, M4 P1).
+    pub fn render_overlay(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        target: &wgpu::TextureView,
+        target_size: (u32, u32),
+        dl: &DrawList,
+        atlas: Option<&UiAtlasGpu>,
+    ) -> Result<(), GfxError> {
+        self.render_impl(device, queue, encoder, target, target_size, dl, atlas, None)
+    }
+
+    fn render_impl(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        target: &wgpu::TextureView,
+        target_size: (u32, u32),
+        dl: &DrawList,
+        atlas: Option<&UiAtlasGpu>,
+        clear: Option<Rgba>,
+    ) -> Result<(), GfxError> {
         // Alle Batches in einen Vertex-Buffer; je Batch (first, count).
         let mut verts: Vec<u8> = Vec::new();
         let mut ranges: Vec<(u32, u32)> = Vec::new();
@@ -319,12 +348,15 @@ impl UiGpu {
                 depth_slice: None,
                 resolve_target: None,
                 ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(wgpu::Color {
-                        r: clear[0] as f64,
-                        g: clear[1] as f64,
-                        b: clear[2] as f64,
-                        a: clear[3] as f64,
-                    }),
+                    load: match clear {
+                        Some(c) => wgpu::LoadOp::Clear(wgpu::Color {
+                            r: c[0] as f64,
+                            g: c[1] as f64,
+                            b: c[2] as f64,
+                            a: c[3] as f64,
+                        }),
+                        None => wgpu::LoadOp::Load,
+                    },
                     store: wgpu::StoreOp::Store,
                 },
             })],

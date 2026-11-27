@@ -1,0 +1,45 @@
+{
+  "name": "default",
+  "colors": {
+    "background": [0.086, 0.080, 0.074, 1.0],
+    "panel": [0.117, 0.110, 0.102, 1.0],
+    "header": [0.145, 0.137, 0.127, 1.0],
+    "border": [0.200, 0.190, 0.175, 1.0],
+    "text": [0.870, 0.850, 0.820, 1.0],
+    "text_dim": [0.550, 0.530, 0.500, 1.0],
+    "accent": [0.900, 0.350, 0.150, 1.0],
+    "accent_hover": [1.000, 0.450, 0.220, 1.0],
+    "hover": [0.160, 0.150, 0.140, 1.0],
+    "select": [0.320, 0.160, 0.090, 1.0],
+    "input": [0.070, 0.065, 0.060, 1.0],
+    "viewport_bg": [0.020, 0.020, 0.025, 1.0]
+  },
+  "metrics": {
+    "row_h": 24.0,
+    "tab_h": 26.0,
+    "pad": 6.0,
+    "corner": 3.0,
+    "splitter": 4.0,
+    "font_px": 15.0,
+    "font_px_small": 12.0,
+    "icon_px": 16.0
+  },
+  "labels": {
+    "menu.file": "File",
+    "menu.edit": "Edit",
+    "menu.help": "Help",
+    "panel.outliner": "Outliner",
+    "panel.inspector": "Inspector",
+    "panel.viewport": "Viewport",
+    "panel.console": "Console",
+    "panel.assistant": "Assistant",
+    "project.new": "New Project",
+    "project.load": "Open Project…",
+    "project.save": "Save Project",
+    "project.close": "Close Project",
+    "project.info": "Project Info",
+    "editor.undo": "Undo",
+    "editor.redo": "Redo",
+    "status.hint": "WASD/QE fly · drag = look · wheel = speed · Esc = quit · Ctrl+S/Z/Y"
+  }
+}

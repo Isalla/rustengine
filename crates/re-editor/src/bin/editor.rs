@@ -10,6 +10,10 @@
 //! Headless-Modus (`--headless <frames> <out.png> [cells_dir]`): läuft
 //! ohne Fenster, hält die Kamera am Ursprung und schreibt den letzten
 //! Frame als PNG — für Pi/CI und schnelle Smoke-Tests.
+//!
+//! Preset-Beweis (`--ui-png <out.png> [w h]`): malt einen kompletten
+//! Editor-Frame des `default`-Presets (Chrome + Panels) CPU-seitig als
+//! PNG — ohne Fenster, ohne GPU, als CI-Gate für M4 P1.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -19,7 +23,9 @@ use glam::{Mat4, Vec2, Vec3};
 use image::RgbaImage;
 use re_core::material::Material;
 use re_core::mesh::Mesh;
-use re_editor::EditorCamera;
+use re_editor::{activate_tab, EditorCamera, EditorContext, LayoutManifest, PanelState, Preset};
+use re_render::ui::widgets::{Ui, UiInput, UiState};
+use re_render::ui::{dock_layout, DockNode, DrawList, FontAtlas, Rect, Theme};
 use re_render::{DrawBatch, GfxBackend};
 use re_world::{
     CellHandoff, CellKey, Clipmap, ClipmapConfig, GpuUpload, HandoffConfig, Priority, StreamConfig,
@@ -118,6 +124,136 @@ fn seed_blocks(store: &re_world::FileStore, _clip: &re_world::Clipmap, x0: f64, 
     blocks
 }
 
+// ── Editor-UI (M4 P1: Preset-getriebenes Frontend) ───────────────────
+//
+// Der Rahmen baut pro Frame eine Draw-Liste aus dem eingebetteten
+// `default`-Preset (Manifest + Theme, ADR-0001). Fenster-Modus legt sie
+// als Overlay über die Szene; `--ui-png` malt sie CPU-seitig als PNG —
+// derselbe Rahmen, derselbe Beweis ohne Display.
+
+const FONT_REGULAR: &[u8] = include_bytes!("../../../../assets/fonts/inter/Inter-Regular.ttf");
+const FONT_BOLD: &[u8] = include_bytes!("../../../../assets/fonts/inter/Inter-Bold.ttf");
+
+/// Startbestand der Welt, damit Outliner und Inspector Inhalte zeigen.
+/// Das ist App-Code (Welt bauen), kein Control — Controls rufen nur
+/// Capabilities an.
+fn seed_entities(ctx: &EditorContext) {
+    let Ok(mut w) = ctx.world.lock() else { return };
+    for (i, name) in ["Player", "Lager-Halle", "Sendeantenne"].iter().enumerate() {
+        let e = w.spawn();
+        w.insert(e, re_core::transform::Transform { translation: [i as f32 * 4.0, 0.0, 0.0], ..Default::default() });
+        w.insert(e, re_editor::Name::new(*name));
+        w.insert(e, re_editor::Visible::default());
+    }
+}
+
+/// Der Preset-Rahmen: Manifest-Daten + Theme + Widget-Zustand.
+struct EditorUi {
+    ctx: EditorContext,
+    manifest: LayoutManifest,
+    /// Arbeitskopie des Dock-Baums (Tab-Aktivierung schreibt hierhin).
+    dock: DockNode,
+    theme: Theme,
+    atlas: FontAtlas,
+    state: UiState,
+    panels: PanelState,
+    /// Viewport-Rechteck des letzten Frames (für Kamera-Input-Gating).
+    viewport: Rect,
+}
+
+impl EditorUi {
+    fn new() -> Result<Self> {
+        let preset = Preset::embedded_default();
+        let ctx = EditorContext::new(Vec3::new(0.0, 80.0, 0.0));
+        preset
+            .manifest
+            .validate_against(|c| ctx.has(c))
+            .context("default-Preset gegen Registry")?;
+        let atlas = FontAtlas::build(
+            &[FONT_REGULAR, FONT_BOLD],
+            preset.theme.metrics.font_px,
+            "äöüÄÖÜß—→…",
+            1024,
+            512,
+        )
+        .map_err(|e| anyhow::anyhow!("font atlas: {e:?}"))?;
+        let mut panels = PanelState::default();
+        panels.log(format!("preset '{}' geladen", preset.manifest.name));
+        panels.log("willkommen — try: project.info".to_string());
+        seed_entities(&ctx);
+        Ok(Self {
+            ctx,
+            dock: preset.manifest.dock.clone(),
+            manifest: preset.manifest,
+            theme: preset.theme,
+            atlas,
+            state: UiState::default(),
+            panels,
+            viewport: Rect::new(0.0, 0.0, 0.0, 0.0),
+        })
+    }
+
+    /// Ein kompletter UI-Durchgang: Chrome + Panels + Popup. Tastatur-
+    /// und Mauskanten kommen als `input`; der Rückgabewert ist die
+    /// fertige Draw-Liste für Overlay oder PNG.
+    fn frame(&mut self, size: (u32, u32), input: &UiInput) -> DrawList {
+        let (w, h) = (size.0 as f32, size.1 as f32);
+        let area = Rect::new(0.0, 0.0, w, h);
+        // Klick außerhalb von Menüleiste + Popup schließt das Menü.
+        if input.pressed && self.panels.open_menu.is_some() {
+            let in_popup = self
+                .panels
+                .popup
+                .is_some_and(|p| input.pointer.is_some_and(|pt| p.contains(pt[0], pt[1])));
+            let in_bar = input.pointer.is_some_and(|pt| pt[1] < self.theme.metrics.row_h);
+            if !in_popup && !in_bar {
+                self.panels.open_menu = None;
+            }
+        }
+        let row = self.theme.metrics.row_h;
+        let menu_bar = Rect::new(0.0, 0.0, w, row);
+        let toolbar = Rect::new(0.0, row, w, row);
+        let status = Rect::new(0.0, (h - row).max(0.0), w, row);
+        let dock = Rect::new(0.0, row * 2.0, w, (h - row * 3.0).max(0.0));
+        let placements =
+            dock_layout(&self.dock, dock, self.theme.metrics.tab_h, self.theme.metrics.splitter);
+
+        let mut ui = Ui::new(area, &self.theme, &self.atlas, None, &mut self.state, input);
+        // Panels zuerst, Chrome darüber, Popup zuletzt (Painter-Order).
+        for pl in &placements {
+            if pl.panel == "viewport" {
+                self.viewport = pl.rect;
+            }
+            re_editor::panels::draw_panel(&mut ui, pl, &self.theme, &self.atlas, input, &self.ctx, &mut self.panels);
+        }
+        re_editor::panels::draw_menu_bar(&mut ui, menu_bar, &self.manifest.menu_bar, &self.theme, &self.atlas, &mut self.panels);
+        re_editor::panels::draw_toolbar(&mut ui, toolbar, &self.manifest.toolbar, &self.theme, &self.atlas, &self.ctx, &mut self.panels);
+        re_editor::panels::draw_status_bar(&mut ui, status, &self.theme, &self.atlas, &self.ctx, &self.panels);
+        re_editor::panels::draw_menu_popup(&mut ui, &self.manifest.menu_bar, &self.theme, &self.atlas, menu_bar, &self.ctx, &mut self.panels);
+        ui.end();
+        if let Some(id) = self.panels.tab_pick.take() {
+            activate_tab(&mut self.dock, &id);
+        }
+        ui.draw
+    }
+}
+
+/// Preset-Beweis ohne Display: einen UI-Frame CPU-seitig rasterisieren
+/// und als PNG speichern (CI/Pi — Gate für M4 P1).
+fn run_ui_png(out: PathBuf, w: u32, h: u32) -> Result<()> {
+    let mut ui = EditorUi::new()?;
+    let input = UiInput::default();
+    let dl = ui.frame((w, h), &input);
+    let rgba = re_render::rasterize(&dl, Some(&ui.atlas), w, h, ui.theme.colors.background);
+    if let Some(p) = out.parent() {
+        std::fs::create_dir_all(p).ok();
+    }
+    let img = RgbaImage::from_raw(w, h, rgba).context("puffer")?;
+    img.save(&out).with_context(|| format!("PNG: {}", out.display()))?;
+    eprintln!("preset-frame ({}x{}) -> {}", w, h, out.display());
+    Ok(())
+}
+
 // ── Fenster-Modus ─────────────────────────────────────────────────────
 #[cfg(feature = "window")]
 mod live {
@@ -194,10 +330,20 @@ mod live {
         now: f64,
         hlod: re_world::HlodSet,
         outer: f64,
+        /// Preset-Rahmen (Manifest + Theme + Widget-Zustand, M4 P1).
+        ui: EditorUi,
+        /// Eingabe-Kanten für den nächsten UI-Frame.
+        ui_pointer: Option<[f32; 2]>,
+        ui_pressed: bool,
+        ui_released: bool,
+        ui_wheel: f32,
+        ui_chars: String,
+        ui_backspace: bool,
+        ui_enter: bool,
     }
 
     impl EditorApp {
-        pub fn new(cells_dir: PathBuf, seed_x0: f64, seed_x1: f64) -> Self {
+        pub fn new(cells_dir: PathBuf, seed_x0: f64, seed_x1: f64) -> Result<Self> {
             let clip_cfg = ClipmapConfig { base_cell: BASE_CELL, radius: 2, levels: 3 };
             let clip = Clipmap::new(clip_cfg);
             let store = re_world::FileStore::new(&cells_dir);
@@ -215,7 +361,7 @@ mod live {
                 let gz1 = (SEED_HALF_Z / s).floor() as i64;
                 key.x >= gx0 && key.x <= gx1 && key.y >= gz0 && key.y <= gz1
             };
-            Self {
+            Ok(Self {
                 window_src: None,
                 size: (1280, 720),
                 clip,
@@ -233,10 +379,41 @@ mod live {
                 now: 0.0,
                 hlod,
                 outer,
-            }
+                ui: EditorUi::new()?,
+                ui_pointer: None,
+                ui_pressed: false,
+                ui_released: false,
+                ui_wheel: 0.0,
+                ui_chars: String::new(),
+                ui_backspace: false,
+                ui_enter: false,
+            })
         }
 
         fn held(&self, k: Key) -> bool { self.keys.contains(&k) }
+
+        /// Passt ein gerade gedrückter Key zu einem Manifest-Shortcut?
+        /// Liefert das zugehörige Command (Modifikatoren aus dem
+        /// gedrückten Zustand, Namen aus dem Manifest — ADR-0001).
+        fn match_shortcut(&self, key: Key) -> Option<re_editor::LayoutCommand> {
+            let name = format!("{key:?}");
+            let ctrl = self.held(Key::ControlLeft) || self.held(Key::ControlRight);
+            let shift = self.held(Key::ShiftLeft) || self.held(Key::ShiftRight);
+            let alt = self.held(Key::AltLeft) || self.held(Key::AltRight);
+            self.ui.manifest.shortcuts.iter().find(|s| {
+                s.key == name && s.ctrl == ctrl && s.shift == shift && s.alt == alt
+            }).map(|s| re_editor::LayoutCommand {
+                id: s.capability.clone(),
+                capability: s.capability.clone(),
+                args: s.args.clone(),
+                separator: false,
+            })
+        }
+
+        /// Zeiger liegt über dem Viewport-Fenster (Szene, kein Panel)?
+        fn over_viewport(&self) -> bool {
+            self.ui_pointer.is_some_and(|p| self.ui.viewport.contains(p[0], p[1]))
+        }
     }
 
     impl App for EditorApp {
@@ -264,13 +441,25 @@ mod live {
                     self.input.apply(&ev);
                     match ev {
                         InputEvent::Key { key, pressed, repeat } => {
+                            if pressed && !repeat {
+                                // Manifest-Shortcuts haben Vorrang (Ctrl+S/Z/Y).
+                                if let Some(cmd) = self.match_shortcut(key) {
+                                    re_editor::panels::run_command(&self.ui.ctx, &mut self.ui.panels, &cmd);
+                                } else if key == Key::Escape {
+                                    return AppResponse::Exit;
+                                }
+                                if key == Key::Enter { self.ui_enter = true; }
+                                if key == Key::Backspace { self.ui_backspace = true; }
+                            }
                             if pressed {
-                                if !repeat && key == Key::Escape { return AppResponse::Exit; }
                                 if !self.keys.contains(&key) { self.keys.push(key); }
                             } else { self.keys.retain(|k| *k != key); }
                         }
-                        InputEvent::MouseButton { button: MouseButton::Left, pressed } => { self.dragging = pressed; }
+                        InputEvent::Char(c) => {
+                            if !c.is_control() { self.ui_chars.push(c); }
+                        }
                         InputEvent::MouseMove { x, y } => {
+                            self.ui_pointer = Some([x as f32, y as f32]);
                             let delta = self.last_mouse.map(|(px, py)| (x - px, y - py));
                             self.last_mouse = Some((x, y));
                             if self.dragging {
@@ -279,9 +468,18 @@ mod live {
                                 }
                             }
                         }
+                        InputEvent::MouseButton { button: MouseButton::Left, pressed } => {
+                            if pressed { self.ui_pressed = true; } else { self.ui_released = true; }
+                            // Ziehen startet nur über dem Viewport — Panels
+                            // beanspruchen Klicks zuerst (Widget-Regel).
+                            self.dragging = pressed && self.over_viewport();
+                        }
                         InputEvent::Wheel { dy, .. } => {
-                            let f = (1.0 - dy as f32 * 0.1).clamp(0.5, 2.0);
-                            self.speed = (self.speed * f).clamp(5.0, 400.0);
+                            self.ui_wheel += dy as f32 * 24.0;
+                            if self.over_viewport() {
+                                let f = (1.0 - dy as f32 * 0.1).clamp(0.5, 2.0);
+                                self.speed = (self.speed * f).clamp(5.0, 400.0);
+                            }
                         }
                         _ => {}
                     }
@@ -289,18 +487,22 @@ mod live {
                 }
                 PlatformEvent::Tick { dt, .. } => {
                     self.now += dt as f64;
-                    let speed = self.speed * dt;
-                    let boost = if self.held(Key::ShiftLeft) || self.held(Key::ShiftRight) { 4.0 } else { 1.0 };
-                    let fwd = self.camera.forward();
-                    let right = self.camera.right();
-                    let mut move_by = Vec3::ZERO;
-                    if self.held(Key::W) { move_by += fwd * speed * boost; }
-                    if self.held(Key::S) { move_by -= fwd * speed * boost; }
-                    if self.held(Key::D) { move_by += right * speed * boost; }
-                    if self.held(Key::A) { move_by -= right * speed * boost; }
-                    if self.held(Key::E) { move_by += Vec3::Y * speed * boost; }
-                    if self.held(Key::Q) { move_by -= Vec3::Y * speed * boost; }
-                    self.camera.translate(move_by);
+                    // Flugsteuerung nur ohne Textfeld-Fokus — getippter
+                    // Text gehört dem Widget, nicht der Kamera.
+                    if !self.ui.state.has_focus() {
+                        let speed = self.speed * dt;
+                        let boost = if self.held(Key::ShiftLeft) || self.held(Key::ShiftRight) { 4.0 } else { 1.0 };
+                        let fwd = self.camera.forward();
+                        let right = self.camera.right();
+                        let mut move_by = Vec3::ZERO;
+                        if self.held(Key::W) { move_by += fwd * speed * boost; }
+                        if self.held(Key::S) { move_by -= fwd * speed * boost; }
+                        if self.held(Key::D) { move_by += right * speed * boost; }
+                        if self.held(Key::A) { move_by -= right * speed * boost; }
+                        if self.held(Key::E) { move_by += Vec3::Y * speed * boost; }
+                        if self.held(Key::Q) { move_by -= Vec3::Y * speed * boost; }
+                        self.camera.translate(move_by);
+                    }
                     self.input.frame_start();
 
                     let cam2 = Vec2::new(self.camera.position.x, self.camera.position.z);
@@ -338,7 +540,19 @@ mod live {
                         );
                         batches.push(DrawBatch { mesh: &hlod_quads, material: hlod_material, world, sprite: None, cell: None });
                     }
-                    if let Err(e) = self.exec.backend.render(&camera, &batches) {
+                    // UI-Frame: Eingabe-Kanten → Draw-Liste; Szene mit
+                    // Overlay rendern, Kanten für nächsten Frame leeren.
+                    let ui_input = UiInput {
+                        pointer: self.ui_pointer,
+                        pressed: std::mem::replace(&mut self.ui_pressed, false),
+                        released: std::mem::replace(&mut self.ui_released, false),
+                        scroll: std::mem::replace(&mut self.ui_wheel, 0.0),
+                        chars: std::mem::take(&mut self.ui_chars),
+                        backspace: std::mem::replace(&mut self.ui_backspace, false),
+                        enter: std::mem::replace(&mut self.ui_enter, false),
+                    };
+                    let dl = self.ui.frame(self.size, &ui_input);
+                    if let Err(e) = self.exec.backend.render_with_ui(&camera, &batches, Some((&dl, &self.ui.atlas))) {
                         eprintln!("render: {e}");
                         return AppResponse::Exit;
                     }
@@ -361,7 +575,7 @@ mod live {
         let store = re_world::FileStore::new(&cells_dir);
         let blocks = seed_blocks(&store, &clip, seed_x0, seed_x1, -SEED_HALF_Z, SEED_HALF_Z);
         eprintln!("Welt erzeugt: {blocks} Blöcke in {} — Flugstrecke {:.0} m", cells_dir.display(), (seed_x1 - seed_x0));
-        let mut app = EditorApp::new(cells_dir, seed_x0, seed_x1);
+        let mut app = EditorApp::new(cells_dir, seed_x0, seed_x1)?;
         let options = WindowOptions { title: "RE — Editor (scene view)".into(), width: 1280, height: 720 };
         run_app(&mut app, options).map_err(anyhow::Error::msg)
     }
@@ -443,6 +657,12 @@ mod live {
 // ── main ──────────────────────────────────────────────────────────────
 fn main() -> Result<()> {
     let argv: Vec<String> = std::env::args().skip(1).collect();
+    if argv.first().map(|s| s.as_str()) == Some("--ui-png") {
+        let out = PathBuf::from(argv.get(1).cloned().unwrap_or_else(|| "editor_ui.png".into()));
+        let w: u32 = argv.get(2).and_then(|s| s.parse().ok()).unwrap_or(1280);
+        let h: u32 = argv.get(3).and_then(|s| s.parse().ok()).unwrap_or(720);
+        return run_ui_png(out, w, h);
+    }
     if argv.first().map(|s| s.as_str()) == Some("--headless") {
         let frames: u32 = argv.get(1).and_then(|s| s.parse().ok()).unwrap_or(60);
         let out = PathBuf::from(argv.get(2).cloned().unwrap_or_else(|| "editor.png".into()));

@@ -13,16 +13,22 @@
 
 pub mod context;
 pub mod import;
+pub mod layout;
 pub mod outliner;
+pub mod panels;
 pub mod project;
 pub mod undo;
 pub mod workspace;
 
 pub use context::EditorContext;
 pub use import::{ImportResult, import_gltf, import_summary, register_import_tools};
+pub use layout::{
+    activate_tab, Command as LayoutCommand, LayoutManifest, Menu, Preset, Shortcut,
+};
 pub use outliner::{
     ComponentRegistry, Name, Outliner, SharedRegistry, Visible, register_outliner_tools,
 };
+pub use panels::PanelState;
 pub use project::{ProjectDoc, SharedProjectDoc, register_project_tools};
 pub use workspace::Workspace;
 pub use undo::{
