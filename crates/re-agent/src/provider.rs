@@ -48,7 +48,7 @@ impl ProviderConfig {
             api_key_env: None,
         }
     }
-    /// Auch für lokale Proxy-Endpunkte (z. B. Strata) — alles OpenAI-Kompatibilität.
+    /// Auch für lokale Proxy-Endpunkte (z. B. Strata) — alles OpenAI-kompatibel.
     pub fn openai_compatible(base_url: impl Into<String>, model: impl Into<String>, key_env: impl Into<String>) -> Self {
         Self { kind: ProviderKind::OpenAiCompatible, base_url: base_url.into(), model: model.into(), api_key_env: Some(key_env.into()) }
     }
@@ -61,7 +61,7 @@ impl ProviderConfig {
         }
     }
 
-    /// Schlüssel aus der konfigurierten Umgebung Variable (M4 nutzt ihn der Transport).
+    /// Schlüssel aus der konfigurierten Umgebungsvariable (M4 nutzt ihn der Transport).
     pub fn api_key(&self) -> Option<String> {
         self.api_key_env.as_ref().and_then(|var| std::env::var(var).ok())
     }

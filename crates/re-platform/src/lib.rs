@@ -80,7 +80,7 @@ pub trait PlatformApi: Send {
     /// True, wenn der User das Fenster geschlossen/beenden gewaehlt hat.
     fn should_close(&self) -> bool;
 
-    /// Sekundo seit Programmstart — Delta-Time-Berechnung.
+    /// Sekunden seit Programmstart — Delta-Time-Berechnung.
     fn now_secs(&self) -> f64;
 
     /// Fenstertitel setzen (optional).

@@ -34,8 +34,8 @@ Engine-Funktionen**, die im Prozess wohnt.
   direkter Zugriff auf Szene, Meshes, Undo-Stack, Dateisystem.
   HTTP-Endpunkte sind danach *nur noch Details* (Ollama :11434,
   llama-server :8080, OpenAI-kompatible Proxies wie Strata, Anthropic API).
-* **MCP (bleibt unterstützt):** `re-mcp` exportiert exakt dieselbe
-  Registry nach außen. Wo keine Direktverbindung möglich oder gewünscht
+* **MCP (geplant):** `re-mcp` wird exakt dieselbe Registry nach außen
+  exportieren. Wo keine Direktverbindung möglich oder gewünscht
   ist (andere Maschine, fremde App), steuert die KI den Editor trotzdem.
   Nichts an Engine-Funktionen wird zweimal geschrieben.
 

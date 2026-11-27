@@ -39,7 +39,7 @@ let stats = reg.call("world.stats", serde_json::json!({})).unwrap();
 
 Weil Bearbeiten und Abfragen durch eine Tür laufen, kann ein Agent
 genau das tun, was der Editor tut — kein zweites Skript-API, das
-synchron gehalten werden muss, keine „Automatisierungs-Schicht", die
+synchron gehalten werden muss, keine „Automatisierungs-Schicht“, die
 von der UI wegdiftet. Der M4-Editor verwendet dieselbe Registry für
 seine Panels.
 

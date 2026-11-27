@@ -45,7 +45,7 @@ struct ComponentEntry {
 }
 
 /// Registry der inspizierbaren Components. Wird einmal aufgebaut und
-/// mit dem ECS-World geteilt.
+/// mit der ECS-Welt geteilt.
 pub struct ComponentRegistry {
     entries: BTreeMap<String, ComponentEntry>,
 }

@@ -33,7 +33,7 @@ Der `CellHandoff` ist eine Triple-Buffer-Pipeline zwischen Streamer
 und GPU: pro Frame wird höchstens ein Byte-Kontingent hochgeladen,
 frisch geladene Zellen werden erst sichtbar, wenn ihr Upload retiret
 ist, und freigegebene Zellen laufen mit Karenzzeit aus. Die
-Render-Schleife blockiert nie für IO — deshalb ist „kein Ladebildschirm"
+Render-Schleife blockiert nie für IO — deshalb ist „kein Ladebildschirm“
 eine Eigenschaft der Pipeline und kein Glück.
 
 ## Quality-Tiers und die Ego-Übergabe

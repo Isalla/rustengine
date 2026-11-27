@@ -51,7 +51,7 @@ Block-Skalierung, FP8; zur Einordnung: BF16 ist Ampere-Alter, int8
 älter) — um zu testen, was die Engine im High-End kann und welche
 wirklich coolen Gaming-Features diese Einheiten ermoeglichen.
 
-**Ehrliche Grenze:** wgpu expose keine Tensor-Cores / FP4 /
+**Ehrliche Grenze:** wgpu exponiert keine Tensor-Cores / FP4 /
 Cooperative-Matrix-Extensionen. Die gibt es nur ueber rohes Vulkan
 (`VK_NV_cooperative_vector`, `VK_KHR_cooperative_matrix`) oder D3D12 —
 die Demo muss also ein **Vendor-Sidecar** sein (natives Modul oder

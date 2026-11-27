@@ -10,7 +10,7 @@ einer einzigen WGSL-Shader-Quelle.
 
 Alles an dieser Engine baut auf einem Ziel: **Die Kamera fällt aus der
 Strategie-Draufsicht in die Ego-Perspektive einer Einheit — mitten im
-Flug, ohne Ladebildschirm und ohne Schnitt — und übergabe dabei die
+Flug, ohne Ladebildschirm und ohne Schnitt — und übergibt dabei die
 Steuerung.** Dieselbe Laufzeit bedient danach einen Shooter oder ein
 MMO, weil der Runtime selbst keine Spielregeln kennt.
 

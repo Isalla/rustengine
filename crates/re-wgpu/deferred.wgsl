@@ -169,7 +169,7 @@ fn sbnd(i : u32) -> f32 {
 
 /// Sichttiefe → Kaskade — gespiegeltes `cascade_for_depth`: Bereich
 /// [grenze[i], grenze[i+1]), Grenze selbst gehoert zur hoheren Kaskade,
-/// auerhalb der Reichweite -1 (kein Schatten).
+/// außerhalb der Reichweite -1 (kein Schatten).
 fn shadow_cascade(d : f32, n : u32) -> u32 {
     var c : u32 = 0u;
     for (var i = 1u; i <= n; i = i + 1u) {

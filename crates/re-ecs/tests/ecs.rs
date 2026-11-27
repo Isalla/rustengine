@@ -111,7 +111,7 @@ fn iteration_ueber_eine_und_zwei_spalten() {
     });
     assert_eq!(joined, 3);
 
-    // Even i (0, 2, 4) trug zusätzlich Velocity und bekam +1.
+    // Gerades i (0, 2, 4) trug zusätzlich Velocity und bekam +1.
     let alle: Vec<f32> = {
         let mut v = Vec::new();
         world.for_each(|_, p: &Position| v.push(p.x));

@@ -4,7 +4,7 @@ use std::any::Any;
 
 use crate::entity::Entity;
 
-/// Typ-erase Ansicht auf einen Sparse-Set (für die Welt-Registry).
+/// typgelöschte Ansicht auf einen Sparse-Set (für die Welt-Registry).
 ///
 /// `Send` als Supertrait, damit `World` (und damit `Mutex<World>`) über
 /// Threads geteilt werden kann — Editor und Agent adressieren dieselbe

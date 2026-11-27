@@ -12,7 +12,7 @@
 //! muss dieselbe Mathematik verwenden (PCF gegen den Depth-Compare-
 //! Sampler); die Map-Textur selbst folgt mit der Pipeline.
 //!
-//! Aufteilung nach dem verbreiteten „practical split"-Schema: eine
+//! Aufteilung nach dem verbreiteten „practical split“-Schema: eine
 //! Mischung aus logarithmischer und gleichmäßiger Verteilung.
 //!
 //! ```text
@@ -197,7 +197,7 @@ pub fn cascade_for_depth(boundaries: &[f32], d: f32) -> Option<usize> {
     if d < boundaries[0] || d >= boundaries[last] {
         return None;
     }
-    // Lineare Suche: hochstaens fuenf Grenzen — kein Binary Search noetig.
+    // Lineare Suche: höchstens fünf Grenzen — kein Binary Search noetig.
     for i in 0..last {
         if d < boundaries[i + 1] {
             return Some(i);

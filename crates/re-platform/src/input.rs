@@ -3,7 +3,7 @@
 //! Regeln aus `docs/architektur.md`: Engine-Code matcht auf [`Key`]
 //! (layout-unabhängig, physische Taste) oder bekommt gedruckte Zeichen als
 //! [`InputEvent::Char`]. Die Backend-Module (winit, später Web/Konsole)
-//! übersetzen nur nach hierher — und [`InputState`] sammelt den Zustand,
+//! übersetzen nur hierher — und [`InputState`] sammelt den Zustand,
 //! damit Renderer und Gameplay nicht am Event-Stream kleben.
 
 use std::collections::HashSet;
@@ -240,7 +240,7 @@ pub enum MouseButton {
     Other(u16),
 }
 
-/// Eingabe-Ereignis (backend-übersetzt, positionen in Fenster-Pixeln).
+/// Eingabe-Ereignis (backend-übersetzt, Positionen in Fenster-Pixeln).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum InputEvent {
     /// Physische Taste gedrückt/losgelassen; `repeat` = Auto-Wiederholung.

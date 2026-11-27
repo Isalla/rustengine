@@ -108,7 +108,7 @@ playable — even in the browser.
     frame to beat bilinear.
   * **FSR 2/3** (temporal + frame generation): AMD ships MIT-licensed
     shaders; ported to WGSL for all platforms, native timing on desktop.
-  * **FSR 4 / „Redstone"** (ML super resolution, ray regeneration, frame
+  * **FSR 4 / „Redstone“** (ML super resolution, ray regeneration, frame
     generation): open source (MIT) but hardware-locked to RDNA 4; native
     backend only.
   * **XeSS**: runs via the shipped SPIR-V dispatcher; native backend

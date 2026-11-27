@@ -9,7 +9,7 @@
 //! Binary `re-editor` (Feature `window`).
 //!
 //! Doppelte Adressierbarkeit (M11): alles, was hier als Capability
-//! registriert ist, kann Editor, KI und (später) MCP gleichermaßen.
+//! registriert ist, kann Editor, KI und (später) MCP gleichermaßen nutzen.
 
 pub mod context;
 pub mod import;
@@ -194,7 +194,7 @@ fn lock(state: &SharedEditorState) -> Result<MutexGuard<'_, EditorState>, String
 }
 
 /// Hängt die Editor-Capabilities an die Registry. `call` ist `&self`, also
-/// kapseln die Runner ihre Innere Mutabilität selbst (Mutex).
+/// kapseln die Runner ihre innere Mutabilität selbst (Mutex).
 pub fn register_editor_tools(reg: &mut CapabilityRegistry, state: SharedEditorState) {
     {
         let s = Arc::clone(&state);

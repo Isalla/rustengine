@@ -187,7 +187,7 @@ pub(crate) fn readback_texture_layer(
 
 /// Bytes eines Storage-Buffers (GPU-Inhalt → CPU) — fuer den
 /// Listen-Vergleich des Compute-Cullings. Buffer-zu-Buffer-Kopien
-/// kennen keine Zeilen-Ausrichtung, also genueckt die exakte Groesse.
+/// kennen keine Zeilen-Ausrichtung, also genügt die exakte Größe.
 pub(crate) fn readback_buffer(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
@@ -248,7 +248,7 @@ fn block_on<F: Future>(future: F) -> F::Output {
 /// `Arc<Window>` und delegiert die raw-window-handle-Traits darauf.
 /// wgpu box't das Ziel in `SurfaceTarget::DisplayAndWindow` und der
 /// Surface-Handle bleibt gültig, solange die Surface lebt — deshalb hier
-/// ein owned Arc und keinborrowed Referenz-Handle.
+/// ein owned Arc und kein borrowed Referenz-Handle.
 #[cfg(feature = "window")]
 #[derive(Clone)]
 struct WindowSource(std::sync::Arc<winit::window::Window>);
@@ -305,7 +305,7 @@ struct Inner {
     /// TODO(M1c): Key durch stabile Asset-IDs ersetzen; Zeiger-Keys sind
     /// nur für den Offscreen-Demo-Pfad okay.
     mesh_cache: HashMap<usize, MeshGpu>,
-    /// Stream-Zellen in GPU-Residenz (M3c-Handoff): explicit vergebene
+    /// Stream-Zellen in GPU-Residenz (M3c-Handoff): explizit vergebene
     /// 64-Bit-Ids → Buffer. `upload_cell` legt an, `release_cell`
     /// nimmt weg; Batches mit `cell`-Id zeichnen nur, was hier liegt.
     cell_cache: HashMap<u64, MeshGpu>,
@@ -1345,7 +1345,7 @@ impl GfxBackend for WgpuBackend {
                     frame = Some(st);
                     v
                 }
-                // Verdeckt/minimiert oder Acquire-Knappe: Frame folgenlos überspringen.
+                // Verdeckt/minimiert oder Acquire-Knappheit: Frame folgenlos überspringen.
                 wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded => {
                     return Ok(())
                 }

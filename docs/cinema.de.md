@@ -42,7 +42,7 @@ Playhead, Loop-Bereiche, Blend-Zonen zwischen Sequenzen.
 `re-cinema`-Player: Spiel pausiert Logik, Player übergibt Kontrolle,
 Sequence läuft, Signals an Gameplay (Dialog-Optionen, Spawn-Events).
 Cutscene-Rig (Briefing-Kamera) und In-Engine-Cutscene sind derselbe
-Code — kein „gebackenes Video" nötig.
+Code — kein „gebackenes Video“ nötig.
 
 ## KI-Bedienung (Capabilities, ab M6)
 

@@ -7,7 +7,7 @@
 Typische Arbeitsumgebung: 3D-Editor + externer Bild→Mesh-Generator
 (ComfyUI/Tripo/3D-Gen-Studio) als separate Programme. Auf knappen
 Konsumenten-Karten (12 GB) konkurrieren beide um denselben VRAM — jeder hält seine Reserven
-dauerhaft belegt, der Editor stürzt mit „VRAM zu gering" ab, obwohl gerade
+dauerhaft belegt, der Editor stürzt mit „VRAM zu gering“ ab, obwohl gerade
 nur eines der Programme wirklich rechnet.
 
 Lösung RE: **Engine, Editor, KI-Anbindung und Generierung teilen sich einen
@@ -52,7 +52,7 @@ Regeln:
 3. **Gen-Läufe reservieren im Voraus:** `Gen.begin(bytes)` evakuiert so lange
    Editor-Material, bis die Reserve frei meldbar ist; schlägt das fehl
    (weil alles hoch-prioritär ist), kommt eine *Fehlermeldung mit Zahlenseite*
-   („brauche 6.2 GiB, frei 3.1 GiB — was darf weichen?"), kein OOM-Absturz.
+   („brauche 6,2 GiB, frei 3,1 GiB — was darf weichen?“), kein OOM-Absturz.
    `Gen.end()` gibt frei, Editor-Material kommt beim nächsten Zugriff
    automatisch (lazy) zurück.
 4. **Prioritäten** (fest, dokumentiert): laufende Render-Ressourcen des

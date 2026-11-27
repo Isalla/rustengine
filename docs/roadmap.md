@@ -2,7 +2,7 @@
 
 [English](roadmap.md) | [Deutsch](roadmap.de.md)
 
-The full checklist between „clone the repo" and „ship the game", with
+The full checklist between „clone the repo“ and „ship the game“, with
 honest state of repair. ✅ done and test-covered · 🟡 partially built ·
 ⬜ not started. Background on any block:
 [architecture](architecture.md) · [cinema](cinema.md) ·
@@ -241,7 +241,7 @@ way around. No seed lottery.*
       sea"), density graphs, control bitmaps. The seed is *derived*:
       deterministic hash of the canonical parameter document, so the
       world ID is a content address. Variations = hashed counter
-      suffix („ten more like this"). Per-layer hash namespaces keep
+      suffix („ten more like this“). Per-layer hash namespaces keep
       tweaking stable: editing one section re-rolls only that layer's
       random stream, the rest of the world stays identical. Targeted
       edits work like inpainting in image generation: the control

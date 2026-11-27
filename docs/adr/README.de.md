@@ -5,7 +5,7 @@
 Kurze Aufzeichnungen der Grundentscheidungen, die die Engine formen. Eine
 Datei pro Entscheidung, nummeriert als `NNNN-titel.md` (mit deutschem
 Zwilling `NNNN-titel.de.md`). Ein ADR hält Kontext, Entscheidung und
-Konsequenzen fest — das beständige „Warum" neben dem „Wie" im
+Konsequenzen fest — das beständige „Warum“ neben dem „Wie“ im
 [Architektur-Papier](../architecture.de.md).
 
 | # | Titel | Status |

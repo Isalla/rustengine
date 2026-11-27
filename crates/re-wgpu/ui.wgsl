@@ -3,7 +3,7 @@
 // beim Schatten: der Kern ist die Wahrheit, die Hardware spiegelt sie.
 // Deshalb bewusst OHNE Hardware-Sampler gerastert: die bilineare
 // Atlas-Abdeckung wird per `textureLoad` von Hand gerechnet, exakt in
-// derselben Operationenfolge wie der CPU-Kern (Hardware-Filter hätten
+// derselben Operationsfolge wie der CPU-Kern (Hardware-Filter hätten
 // festkomma-quantisierte Texel-Gewichte und würden um LSBs divergieren).
 // Ziel ist lineares RGBA16F; die 8-Bit-Quantisierung passiert erst nach
 // dem Readback — wie beim CPU-Pfad, der ebenfalls float-akkumuliert.
@@ -60,7 +60,7 @@ fn fs_ui_textured(i: Out) -> @location(0) vec4f {
     let size = vec2f(textureDimensions(atlas));
     // Dasselbe Bilinear wie FontAtlas::sample: Koordinate ins Texel-
     // Raster rechnen, auf den Texelzentrums-Bereich [0, size-1] klemmen,
-    // vier Texel gewichten. R8Unorm liefert .r bereits als wert/255.
+    // vier Texel gewichten. R8Unorm liefert .r bereits als Wert/255.
     let fx = clamp(i.uv.x * size.x - 0.5, 0.0, size.x - 1.0);
     let fy = clamp(i.uv.y * size.y - 0.5, 0.0, size.y - 1.0);
     let x0 = i32(floor(fx));

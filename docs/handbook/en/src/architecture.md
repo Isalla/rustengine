@@ -12,6 +12,7 @@
 | `re-wgpu` | The wgpu backend (Vulkan/Metal/WebGPU), offscreen and windowed |
 | `re-platform` | Windows, input, event loop (`App` trait), time |
 | `re-agent` | Capability registry, AI providers, agent-facing world tools |
+| `re-editor` | Editor frontend: document state, undo stack, outliner, project/import capabilities |
 
 Dependencies point one way: `re-world` knows nothing about rendering,
 `re-render` knows nothing about windows, and `re-core` knows nothing

@@ -19,7 +19,7 @@ die Ego-Perspektive einer Einheit wechselt:
 * Dieselbe Welt, dieselben Objekte: Was aus der Distanz ein
   Billboard-Trupp ist, ist aus der Nähe eine detaillierte Figur in
   begehbarem Gelände.
-* Der Rückwechsel funktioniert genauso (Einheit „verlassen", Kamera
+* Der Rückwechsel funktioniert genauso (Einheit „verlassen“, Kamera
   fliegt hinaus und wird wieder zur RTS-Kamera).
 
 Was das technisch von der Engine verlangt:
@@ -101,7 +101,7 @@ KI-Agenten die Erweiterungen identisch sehen.
 ## 5. Welt-Streaming ohne Ladebildschirm
 
 Angelehnt an World-Partition/HLOD-Konzepte aktueller Engines
-(Referenz: „Building Open World Landscapes with Unreal Engine 5"), für
+(Referenz: „Building Open World Landscapes with Unreal Engine 5“), für
 einen Rust-Renderer gebaut:
 
 1. **Grid-Zellen:** Die Welt ist in gleich große Cell-Blöcke zerlegt
@@ -115,7 +115,7 @@ einen Rust-Renderer gebaut:
    Worker zerlegt sie in GPU-Resources; Übergabe erfolgt über
    Triple-Buffering mit Resource-Handles, damit Render- und Update-Thread
    nie blockieren. Sichtwechsel ändern nur Prioritäten, nie die Szene.
-4. **Qualitätsstufen (LOD-System „T0..T4")** pro Instanz:
+4. **Qualitätsstufen (LOD-System „T0..T4“)** pro Instanz:
    * `T0` — Cinematic-/Nah-Detail-Mesh (KI- oder Künstler-Mesh),
    * `T1` — Spiel-Mesh mit Animation,
    * `T2` — Visual-Hull/vereinfachtes Mesh (aus Sprite-Ansichten
@@ -161,7 +161,7 @@ früh abwertet, statt spät Zellen zu verlieren (siehe
 * Szenengraf-Knoten (der Editier-Zustand aus `re-core`) sind beim
   Start Quelle der ECS-Instanzen; Editor-Änderungen schreiben zurück.
 * Transform-Propagation läuft als parallelisierter System-Pass
-  (Referenzen: „Data-Oriented Programming", „C++ Concurrency in Action"
+  (Referenzen: „Data-Oriented Programming“, „C++ Concurrency in Action“
   übertragbar auf Rust-Muster).
 
 ## 7. Editor

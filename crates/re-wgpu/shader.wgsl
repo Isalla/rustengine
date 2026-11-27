@@ -3,7 +3,7 @@
 
 struct Camera {
     view_proj : mat4x4<f32>,
-    light_dir_time : vec4<f32>, // xyz = Lichtichtung (show), w = Zeit (ungenutzt)
+    light_dir_time : vec4<f32>, // xyz = Lichtrichtung (zum Licht hin), w = Zeit (ungenutzt)
 };
 @group(0) @binding(0) var<uniform> cam : Camera;
 

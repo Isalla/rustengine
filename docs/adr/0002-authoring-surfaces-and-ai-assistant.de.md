@@ -87,7 +87,7 @@ Der Assistent ist kein angeklebter Chatbot, sondern der **bestehende
 **CapabilityRegistry**, sichtbar als Panel. Weil er sich den Kontext mit dem
 Editor teilt (offene Datei, Selektion, Cursor) und Projekt und Registry
 lesen kann, antwortet er **über dieses Projekt** und kann RE-spezifische
-Folge-Aktionen vorschlagen: *„das als Capability registrieren"*, *„dieses
+Folge-Aktionen vorschlagen: *„das als Capability registrieren“*, *„dieses
 System zur `Schedule` hinzufügen"*, *„über `world.instances.spawn` ins
 Level setzen"*. Das kann die KI eines fremden Editors nicht; unsere kann
 es, weil die Vorschläge die Registry selbst sind.
@@ -110,7 +110,7 @@ schwer nachzurüsten.
 Weil Code und Graph zwei Ansichten einer Komposition sind, läuft die
 Verknüpfung **in beide Richtungen**:
 
-- **Node → Code:** Fehler an einem Knoten → „zeig mir die Stelle" → die
+- **Node → Code:** Fehler an einem Knoten → „zeig mir die Stelle“ → die
   Agentin löst den Quellort des Knotens auf, der Editor öffnet ihn auf
   dieser Zeile; der Entwickler korrigiert.
 - **Code → Node:** Cursor auf einer System-Funktion → der zugehörige Knoten

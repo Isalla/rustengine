@@ -1,6 +1,6 @@
 //! Cluster-Grid für Licht-Culling und Clustered Shadows (M5, Box 2).
 //!
-//! „Shadow 2.0 = cascaded + clustered": CSM deckt die gerichtete Sonne ab,
+//! „Shadow 2.0 = cascaded + clustered“: CSM deckt die gerichtete Sonne ab,
 //! für Punkt- und Spot-Lichter schneidet man den Sichtraum zusätzlich in
 //! ein 3D-Raster — Bildschirm-Kacheln (x·y) mal logarithmische
 //! Tiefenscheiben. Jede Zelle (ein *Cluster*) trägt die Lichter, die sie

@@ -2,7 +2,7 @@
 
 [English](roadmap.md) | [Deutsch](roadmap.de.md)
 
-Die komplette Checkliste zwischen „Repo klonen" und „Spiel veröffentlichen" —
+Die komplette Checkliste zwischen „Repo klonen“ und „Spiel veröffentlichen“ —
 mit ehrlichem Haken-Stand. ✅ fertig und testabgedeckt · 🟡 teilweise gebaut ·
 ⬜ noch nicht begonnen. Hintergrund zu jedem Block:
 [architecture.de](architecture.de.md) · [cinema.de](cinema.de.md) ·
@@ -17,7 +17,7 @@ mit ehrlichem Haken-Stand. ✅ fertig und testabgedeckt · 🟡 teilweise gebaut
 * World-Partition: Clipmap-Streaming, Quality-Tiers T0..T4, Byte-Budget,
   Pooling — ohne GPU deterministisch testbar (`re-world`, inkl.
   asynchronem IO-Thread-Pool, der Zelldateien von der Platte lädt)
-* Zellen wandern asynchron in die VRAM und werden verzögert wieder
+* Zellen wandern asynchron in den VRAM und werden verzögert wieder
   freigegeben — Überflug-Demo `stream-demo` zeigt die ganze Kette
   (`re-world::handoff`, `re-wgpu`)
 
@@ -245,11 +245,11 @@ aus ihr abgeleitet** (Hash des Parameter-Dokuments), nie umgekehrt.
 Kein Seed-Glücksspiel.*
 
 - [ ] Beschreibung zuerst: die Autorin definiert Absicht — Biome-
-      Karten, Feature-Regeln („Fluss vom Gebirge zum südlichen Meer"),
+      Karten, Feature-Regeln („Fluss vom Gebirge zum südlichen Meer“),
       Dichte-Graphen, Control-Bitmaps. Der Seed wird *abgeleitet*:
       deterministischer Hash des kanonischen Parameter-Dokuments, die
       Welt-ID ist eine Content-Adresse. Varianten = gezählter
-      Hash-Suffix („zehn ähnliche"). Hash-Namensräume je Layer: wer
+      Hash-Suffix („zehn ähnliche“). Hash-Namensräume je Layer: wer
       eine Sektion ändert, würfelt nur deren Zufallsstrom neu — der
       Rest der Welt bleibt identisch. Gezielte Änderungen wirken wie
       Inpainting in der Bildgenerierung: die Control-Bitmaps sind die
@@ -277,7 +277,7 @@ Kein Seed-Glücksspiel.*
 Raspberry-Pi-Hardware laufen muss. Die Engine-Regel kehrt die
 übliche um: das Spiel wird nicht klein für das schwächste Gerät
 gebaut, sondern richtig — und die Engine skaliert es herunter.
-Ehrliche Grenze: kein vollautomatisches „läuft überall" wird
+Ehrliche Grenze: kein vollautomatisches „läuft überall“ wird
 versprochen; geliefert wird erkennen + vorschlagen + ein Klick
 ausführen, denn jeder Schritt ist ein Registry-Tool (doppelte
 Adressierbarkeit, M11), das Mensch und Agent gleich aufrufen.*
@@ -285,7 +285,7 @@ Adressierbarkeit, M11), das Mensch und Agent gleich aufrufen.*
 - [ ] Geräte-Profile als Daten: Fähigkeits-Manifeste (RAM-Kappe,
       GPU-Tier, Ziel-fps, Feature-Flags) — Pi 3/4/5 (V3D), WebGPU,
       Mobile, Desktop. Dieselben Profile treiben das CI-Render-Harness,
-      damit „Pi-Tier" eine messbare Aussage ist, kein Gefühl.
+      damit „Pi-Tier“ eine messbare Aussage ist, kein Gefühl.
       Render-Felder pro Profil: interne Render-Skala + Upscaler-Wahl
       (Pi-Tier = FSR1 räumlich, Desktop = FSR2/3/DLSS) +
       Textur-Zielformat (Pi = ETC2, Desktop = BC7, Web =

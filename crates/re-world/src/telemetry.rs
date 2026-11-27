@@ -13,14 +13,14 @@
 //! keine Systemzeit, kein Zufall. Dieselbe Messfolge ⇒ derselbe Zustand.
 
 /// Config für [`IoTelemetry`] — die Referenzwerte hängen an der Hardware:
-/// was hier „gut" heißt, muss auf der Zielpalette auch gut sein.
+/// was hier „gut“ heißt, muss auf der Zielpalette auch gut sein.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct TelemetryConfig {
     /// EWMA-Gewicht jedes neuen Messwerts (`0..1`, klassisch 0.05…0.2).
     pub alpha: f64,
     /// Latenz, ab der es volle Punktzahl gibt (Sekunden). Darunter bleibt
     /// die Latenz-Note auch bei besseren Werten bei 1 — eine schnelle
-    /// Platte soll nicht „zu gut" für ihre eigenen Stufen sein.
+    /// Platte soll nicht „zu gut“ für ihre eigenen Stufen sein.
     pub ref_latency: f64,
     /// Durchsatz-Referenz in Bytes/Sekunde für die volle Note.
     pub ref_throughput: f64,

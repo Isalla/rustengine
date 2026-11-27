@@ -28,8 +28,8 @@ cargo build -p re-wgpu --no-default-features
 `stream-demo` ist der End-zu-End-Beweis der Welt-Pipeline: Die Welt
 wird als prozedurales Gelände in Blockdateien gebacken, durch
 asynchrone Datei-IO, ein Streaming-Budget, den GPU-Handoff und das
-Fernfeld-HLOD gestreamt — und eine Kamera fliegt darüber hinweg,
-unterwegs in die Ego-Perspektive übergeben.
+Fernfeld-HLOD gestreamt — und eine Kamera fliegt darüber hinweg
+und geht unterwegs in die Ego-Perspektive über.
 
 ```sh
 cargo run -p re-wgpu --bin stream-demo -- \

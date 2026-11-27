@@ -12,6 +12,7 @@
 | `re-wgpu` | Das wgpu-Backend (Vulkan/Metal/WebGPU), offscreen und im Fenster |
 | `re-platform` | Fenster, Eingabe, Event-Loop (`App`-Trait), Zeit |
 | `re-agent` | Capability-Registry, KI-Provider, Welt-Werkzeuge für Agenten |
+| `re-editor` | Editor-Frontend: Dokument-Zustand, Undo-Stack, Outliner, Projekt-/Import-Capabilities |
 
 Die Abhängigkeiten zeigen in eine Richtung: `re-world` kennt kein
 Rendering, `re-render` keine Fenster, und `re-core` kennt von alledem

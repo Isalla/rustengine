@@ -50,7 +50,7 @@ impl Camera {
     /// traegt eine Ausloeschung (nahe -1 plus 1) und erreicht nur
     /// ~1e-3 relative Genauigkeit — fuer logarithmische Cluster-
     /// Scheiben und konservatives Culling genuegend, weil CPU und GPU
-    /// dieselben Werte teilen. Orthografische oder entartete Matrigen
+    /// dieselben Werte teilen. Orthografische oder entartete Matrizen
     /// ergeben `None`.
     pub fn depth_range(&self) -> Option<(f32, f32)> {
         let zz = self.proj.z_axis.z;

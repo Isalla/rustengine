@@ -212,7 +212,7 @@ impl<'a> Ui<'a> {
         self.draw.text(atlas, font, &shown, r.x, y, line_h, color);
     }
 
-    /// Gefülltes Dreieck aus achsensparallelen Scanlines (der
+    /// Gefülltes Dreieck aus achsenparallelen Scanlines (der
     /// Rasterizer kennt nur Rechtecke): `down` = ▾, sonst ▸. Alle
     /// Endpunkte werden gerundet — auch Scanlines halten die
     /// Pixelkanten-Konvention ein.
@@ -618,7 +618,7 @@ mod tests {
             ui.end();
         }
         {
-            // Rad daneber (Zeiger außerhalb): keine Änderung.
+            // Rad daneben (Zeiger außerhalb): keine Änderung.
             let mut i = inp(Some([150.0, 110.0]), false, false);
             i.scroll = -100.0;
             let mut ui = Ui::new(area(), &t, &a, None, &mut st, &i);

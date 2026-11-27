@@ -1,4 +1,4 @@
-//! GPU-Handoff: von der fertigen Zell-Payload sicher in die VRAM (M3c).
+//! GPU-Handoff: von der fertigen Zell-Payload sicher in den VRAM (M3c).
 //!
 //! Zwischen [`Streamer`](crate::stream::Streamer) und Render-loop liegt
 //! ein Engpass mit zwei falschen Antworten: sofort hochladen (der Update-
@@ -40,7 +40,7 @@ use crate::grid::CellKey;
 /// bewusst einmal pro Frame mit einem gedeckelten Batch auf, nie
 /// mitten in einem anderen System.
 pub trait GpuUpload<P> {
-    /// Batch fest übernachten: GPU-Ressourcen für jede Zelle anlegen.
+    /// Batch fest übernehmen: GPU-Ressourcen für jede Zelle anlegen.
     fn submit(&mut self, frame: u64, jobs: Vec<(CellKey, P, u64)>);
 
     /// GPU-Ressourcen einer Zelle endgültig freigeben. Kommt
@@ -156,7 +156,7 @@ impl<P> CellHandoff<P> {
         self.pending.push_back((cell, payload, bytes));
     }
 
-    /// Zelle soll aus der VRAM (Verdrängung, Tier-Wechsel). Wirkt in
+    /// Zelle soll aus dem VRAM (Verdrängung, Tier-Wechsel). Wirkt in
     /// jeder Phase — nur nie durch Eingriff in eine laufende Übergabe.
     pub fn evict(&mut self, cell: CellKey) {
         // Noch nicht losgeschickt: einfach aus der Warteschlange werfen.
@@ -464,7 +464,7 @@ mod tests {
 
         let mut h = CellHandoff::new(cfg(3, 1000, 2));
         let mut spy = Spy::new();
-        // Zwei Takts: Streamer füttert, Handoff pipelet.
+        // Zwei Takte: Streamer füttert, Handoff pipelt.
         for _ in 0..8 {
             let delta = streamer.drive();
             for (cell, payload) in delta.loaded {

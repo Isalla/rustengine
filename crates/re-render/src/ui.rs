@@ -499,7 +499,7 @@ pub struct Glyph {
 }
 
 /// R8-Glyphen-Atlas mehrerer Schriften, Shelf-Packer mit 1px Rand
-/// (verhindert UV-Bluten beim Linearen Filtern). Deterministisch:
+/// (verhindert UV-Bluten beim linearen Filtern). Deterministisch:
 /// Glyphen werden sortiert nach (Font, Codepoint) gelegt.
 #[derive(Clone, Debug)]
 pub struct FontAtlas {

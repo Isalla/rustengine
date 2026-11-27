@@ -27,7 +27,7 @@ use crate::input::{InputEvent, Key, MouseButton};
 /// Fenster-Handle-Quelle als `Arc` — hält das Fenster lebendig, solange eine
 /// Surface (oder sonstiger Consumer) es referenziert.
 ///
-/// wgpu speichert das übergebenene Source-Objekt in `Surface::_handle_source`,
+/// wgpu speichert das übergebene Source-Objekt in `Surface::_handle_source`,
 /// damit überlebt das Fenster die Surface-Erzeugung, ohne dass unser
 /// Session-State sich selbst referenzieren muss.
 #[derive(Clone)]

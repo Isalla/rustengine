@@ -40,7 +40,7 @@ use re_world::{
 
 /// Kantenlänge der feinsten Zelle, in Metern.
 const BASE_CELL: f64 = 64.0;
-/// Höhen raster pro Zellkante (17 Stützstellen = 16 Intervalle).
+/// Höhenraster pro Zellkante (17 Stützstellen = 16 Intervalle).
 const SIDE: usize = 17;
 /// Bytes eines Höhenfeld-Blocks: SIDE² × f32 little-endian.
 const BLOCK_BYTES: usize = SIDE * SIDE * 4;
@@ -384,7 +384,7 @@ fn main() -> Result<()> {
     };
 
     // HLOD (M3d): jenseits der Clipmap-Reichweite füllen grobe Cluster
-    // die Ferne. Der „Bake" ist hier ein Maschenrechteck über dem
+    // die Ferne. Der „Bake“ ist hier ein Maschenrechteck über dem
     // Korridor; übernommen wird, was näher als fade_out am Rand liegt.
     let outer = clip_cfg.cell_size(clip_cfg.levels - 1);
     let reach = clip_cfg.outer_radius();
@@ -466,7 +466,7 @@ fn main() -> Result<()> {
             ego_frames += 1;
         }
         // Kamerapunkt vom Rig (stetige Blende), Höhe weich überblendet:
-        // 45 m Übersicht → 1.7 m Augenhöhe.
+        // 45 m Übersicht → 1,7 m Augenhöhe.
         let cam2 = rig.camera();
         let s_ground = height_at(sx, sz) + 45.0;
         let e_ground = height_at(cam2.x as f64, cam2.y as f64) + 1.7;

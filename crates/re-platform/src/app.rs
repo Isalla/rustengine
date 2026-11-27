@@ -133,7 +133,7 @@ pub fn run_app(app: &mut dyn App, options: WindowOptions) -> Result<(), String> 
 
 /// Eigenes Clock-Trait: Treiber erzeugen Zeit, Tests diktieren sie.
 pub trait Clock: Send {
-    /// Sekunden seit Prozeßstart (monoton).
+    /// Sekunden seit Prozessstart (monoton).
     fn now_secs(&mut self) -> f64;
 }
 

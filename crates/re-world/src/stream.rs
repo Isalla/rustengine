@@ -3,7 +3,7 @@
 //! Der [`Streamer`] entscheidet über **Reihenfolge und Budget**, besitzt
 //! aber selbst keine Payloads. Die eigentliche Beschaffung liegt hinter
 //! dem [`CellSource`]-Trait (M3b: [`MockSource`] für Tests und Demos;
-//! M3c: IO-Thread-Pool). Ein fertiger Payload wandert über
+//! M3c: IO-Thread-Pool). Eine fertige Payload wandert über
 //! [`StreamDelta::loaded`] an den Aufrufer — der Renderer ist damit
 //! Eigentümer seiner Ressourcen, der Streamer führt nur die Buchführung
 //! (Status, Bytes, LRU) und meldet über [`StreamDelta::evicted`], welche
@@ -90,7 +90,7 @@ pub struct StreamDelta<P> {
     /// Zellen, die das Budget räumen musste — der Aufrufer gibt die
     /// zugehörige Ressource frei (sie wurde zuvor aus `loaded` geliefert).
     pub evicted: Vec<CellKey>,
-    /// Abgelehnte, fehlgeschlagene oder zu große Ladversuche.
+    /// Abgelehnte, fehlgeschlagene oder zu große Ladeversuche.
     pub failed: Vec<CellKey>,
 }
 
@@ -112,7 +112,7 @@ pub enum SlotState {
     Ready,
 }
 
-/// Reine Buchführung — kein Payload, nur Status und Größe.
+/// Reine Buchführung — keine Payload, nur Status und Größe.
 #[derive(Clone, Copy, Debug)]
 struct Slot {
     state: SlotState,
@@ -186,7 +186,7 @@ impl<S: CellSource> Streamer<S> {
     }
 
     /// Residente Zellen, deterministisch sortiert nach Zellschlüssel —
-    /// Schlüssel und Größe (der Payload liegt beim Aufrufer).
+    /// Schlüssel und Größe (die Payload liegt beim Aufrufer).
     pub fn resident(&self) -> Vec<(CellKey, u64)> {
         let mut out: Vec<_> = self
             .slots

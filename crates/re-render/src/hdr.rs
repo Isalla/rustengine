@@ -1,6 +1,6 @@
 //! HDR-Farb-Pipeline (M5a).
 //!
-//! Der Kern einer „HDR-Pipeline" ist die Farbverarbeitung: Die Szene
+//! Der Kern einer „HDR-Pipeline“ ist die Farbverarbeitung: Die Szene
 //! rendert linear mit Werten über 1,0 (High Dynamic Range), und am Ende
 //! muss daraus ein Display-Bild in 0..1 werden. Diese Umrechnung ist
 //! reine Mathematik — backend-neutral, deterministisch und headless
@@ -76,8 +76,8 @@ impl Default for ToneCurve {
 }
 
 impl ToneCurve {
-    /// Ein Kanal: HDR-linear → Display-linear (0..=1). Für kurven, die
-    /// kanalunabhängig sind, ist das exakt `map_rgb` auf der Graiachse.
+    /// Ein Kanal: HDR-linear → Display-linear (0..=1). Für Kurven, die
+    /// kanalunabhängig sind, ist das exakt `map_rgb` auf der Grauachse.
     pub fn map(&self, x: f32) -> f32 {
         if x <= 0.0 {
             return 0.0;
@@ -97,7 +97,7 @@ impl ToneCurve {
                 const E: f32 = 0.14;
                 (x * (A * x + B)) / (x * (C * x + D) + E)
             }
-            // AgX ist nicht kanalunabhängig — auf der Graiachse ausgewertet.
+            // AgX ist nicht kanalunabhängig — auf der Grauachse ausgewertet.
             ToneCurve::Agx => agx([x, x, x])[0],
         };
         y.clamp(0.0, 1.0)

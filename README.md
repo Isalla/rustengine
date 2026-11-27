@@ -133,5 +133,5 @@ copyright notice and the license text unchanged; see
 
 A friendly request — entirely voluntary and not a condition: if a game
 or tool is built with this engine, I would be glad about a credit
-(„Powered by the RE Rust Engine" in the credits, a link to this
+(„Powered by the RE Rust Engine“ in the credits, a link to this
 repository, or a star on it).

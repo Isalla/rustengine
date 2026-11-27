@@ -1,4 +1,4 @@
-//! Entität-Handles und Index-Allokator mit Generationen.
+//! Entitäts-Handles und Index-Allokator mit Generationen.
 
 /// Handle in die Welt: Slot-Index + Generation.
 ///

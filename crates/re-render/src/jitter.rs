@@ -146,7 +146,7 @@ mod tests {
     #[test]
     fn klemmt_sinnlos() {
         assert_eq!(JitterPattern::new(0).frames, 1);
-        // Ein Frame Zyklus: jeder Frame liefert denselben (ersten) Versatz.
+        // Ein Frame-Zyklus: jeder Frame liefert denselben (ersten) Versatz.
         let p = JitterPattern::new(1);
         assert_eq!(p.offset(0), p.offset(123));
     }

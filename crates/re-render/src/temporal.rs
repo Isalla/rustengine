@@ -111,7 +111,7 @@ impl RgbBox {
 
 /// History-Puffer: RGB (linear) + Akkumulations-Gewicht pro Pixel.
 ///
-/// Gewicht 0 = „kein gültiger Vorgänger" (Frame 1, nach Object ID changes
+/// Gewicht 0 = „kein gültiger Vorgänger“ (Frame 1, nach Object ID changes
 /// oder Resizes). Koordinaten werden auf den Rand geklemmt — Auslesen
 /// außerhalb ist sicher.
 #[derive(Clone, Debug, PartialEq)]

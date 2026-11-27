@@ -8,7 +8,7 @@
 //! geht nur um Welt-Zustand (Zellen, Instanzen, Kamera-Anker, Telemetrie).
 //!
 //! Die Partition läuft in einem `Mutex` hinter einem `Arc`: `call` ist
-//! `&self`, also kapseln die Runner ihre Innere Mutabilität selbst — der
+//! `&self`, also kapseln die Runner ihre innere Mutabilität selbst — der
 //! Editor hält denselben Handle und sieht jede Änderung sofort.
 //!
 //! Das Werkzeug `world.tick` lässt der Agent die Welt selbst weiterschieben
@@ -61,7 +61,7 @@ fn arg_usize(args: &serde_json::Value, key: &str) -> Result<usize, String> {
         .ok_or_else(|| format!("Parameter '{key}' fehlt (Ganzzahl erwartet)"))
 }
 
-/// Zahl der Liste, ab der die Antwort gekürzt wird (Prompt-Atmung).
+/// Zahl der Listeneinträge, ab der die Antwort gekürzt wird (Prompt-Atmung).
 const LIST_CAP: usize = 512;
 
 /// Hängt die Welt-Werkzeuge an die Registry. Bestehende Namen werden
@@ -439,7 +439,7 @@ mod tests {
         let reg = rig();
         // Fehlender Parameter.
         assert!(reg.call("world.camera.set", json!({ "x": 1.0 })).is_err());
-        // Nan/unsinnige dt wird abgewiesen.
+        // NaN/unsinnige dt wird abgewiesen.
         assert!(reg.call("world.tick", json!({ "dt": -1.0 })).is_err());
         // Unbekanntes Werkzeug.
         assert!(reg.call("world.es_gibt_mich_nicht", json!({})).is_err());

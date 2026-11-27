@@ -86,7 +86,7 @@ pub fn run_agent(
             return Ok(last_text);
         }
 
-        // Assistant-Nachricht mit den Calls (serialisiert) voranschieben —
+        // Assistant-Nachricht mit den Calls (serialisiert) voranstellen —
         // Konvention aller Tool-Call-Protokolle (OpenAI/Anthropic/Ollama).
         req.messages.push(ChatMessage {
             role: crate::provider::Role::Assistant,

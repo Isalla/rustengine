@@ -49,7 +49,7 @@ pub struct Capability {
 
 /// Registry aller Engine-Funktionen. `call` ist `&self`, damit der
 /// Agent-Loop parallel zum Editor lesen kann; schreibende Capabilities
-/// kapseln ihre Innere Mutabilität selbst (Editor-Channel, Mutex, …).
+/// kapseln ihre innere Mutabilität selbst (Editor-Channel, Mutex, …).
 #[derive(Default)]
 pub struct CapabilityRegistry {
     tools: BTreeMap<String, Capability>,

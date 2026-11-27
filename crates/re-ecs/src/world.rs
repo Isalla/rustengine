@@ -30,7 +30,7 @@ impl World {
         self.alloc.spawn()
     }
 
-    /// Entfernt die Entität samt aller Komponenten; `false` für
+    /// Entfernt die Entität samt allen Komponenten; `false` für
     /// bereits tote oder unbekannte Handles.
     pub fn despawn(&mut self, entity: Entity) -> bool {
         if !self.alloc.alive(entity) {

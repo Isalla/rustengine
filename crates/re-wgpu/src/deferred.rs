@@ -349,7 +349,7 @@ impl GBufferReadback {
 /// kompilierte Ablauf entscheidet die Reihenfolge (deterministisch,
 /// alphabetischer Tie-Break — deshalb läuft `d-cull` vor `d-geometry`,
 /// obwohl beide unabhängig sind); der Executor führt nur noch aus und
-/// adressiert die Passes über ihre Namen, nicht über feste Indizes.
+/// adressiert die Pässe über ihre Namen, nicht über feste Indizes.
 ///
 /// Was der Graph hier wirklich steuert: die Reihenfolge und die
 /// Lese-/Schreib-Rechte je Pass. Die Layout-Übergänge berechnet er
@@ -463,7 +463,7 @@ pub(crate) struct Deferred {
     cluster_uni_buf: wgpu::Buffer,
     cluster_lights_buf: wgpu::Buffer,
     lights_buf: wgpu::Buffer,
-    /// Kapazitaet von `lights_buf` in Lichtern (wachst bei Bedarf).
+    /// Kapazitaet von `lights_buf` in Lichtern (wächst bei Bedarf).
     lights_cap: usize,
     g_cull: wgpu::BindGroupLayout,
     pipe_cull: wgpu::ComputePipeline,
@@ -472,7 +472,7 @@ pub(crate) struct Deferred {
     pipe_tonemap: wgpu::RenderPipeline,
     /// FSR1 (Box 3): Layout, Pipelines und — nur bei Upscale — die
     /// Display-Ziele (EASU-Zwischenablage, RCAS-Endbild) samt Bindings.
-    /// Das Layout haellt die Bind-Groups nicht lesbar, aber wgpu
+    /// Das Layout hält die Bind-Groups nicht lesbar, aber wgpu
     /// verlangt ihr Weiterleben bis zum letzten Submit — Halter unten.
     #[allow(dead_code)] // naehrt fsr_bind und rcas_bind
     g_fsr: wgpu::BindGroupLayout,
@@ -1279,7 +1279,7 @@ impl Deferred {
         });
 
         // Pass-Indizes aus der Deklaration, per Name aufgeloest — mit
-        // Schatten-Knoten verschieben sich die Indizes der Folge-Passes,
+        // Schatten-Knoten verschieben sich die Indizes der Folge-Pässe,
         // feste Konstanten haetten dafuer umnummerieren muessen.
         let pass_idx = |name: &str| graph.passes().iter().position(|p| p.name == name);
         let idx_cull = pass_idx("d-cull").expect("d-cull ist deklariert");
@@ -1411,7 +1411,7 @@ impl Deferred {
         // pro Frame auf der CPU (dieselben Kern-Aufrufe wie im Test —
         // `CascadeSetup` + `fit_cascade` mit Texel-Snapping). Der
         // Schatten-Werfer-Pass bekommt je Kaskade die Licht-Matrix als
-        // view_proj, das Lighting Matrix-Tabelle, Grenzen und Bias.
+        // view_proj, die Lighting-Matrix-Tabelle, Grenzen und Bias.
         let dr = camera.depth_range();
         if self.shadow.is_some() && dr.is_none() {
             return Err(GfxError::Device("kaskadierte Schatten brauchen eine Perspektiv-Kamera".into()));

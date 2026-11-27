@@ -27,7 +27,7 @@ exponiert. Das ist die Regel der doppelten Adressierbarkeit (M11):
 Menschen-Oberfläche, In-Prozess-Agentin und MCP rufen durch *dieselbe* Tür.
 
 Dieses ADR beantwortet die Frage: **Wie bauen wir die Editor-Oberfläche,
-dass „UE5-Layout" und „Unity-Layout" Varianten EINER Codebasis sind und
+dass „UE5-Layout“ und „Unity-Layout“ Varianten EINER Codebasis sind und
 nicht zwei Forks** — ohne erst einen Klon hartzucodieren und den zweiten
 später dran zu bauen?
 
@@ -92,7 +92,7 @@ eigene Presets sind einfach weitere Daten.
 - Visuelle Treue pro Engine (Icons, exakter Look) ist **Art**-Aufwand,
   kein Code; das Theme-Format muss diese Ressourcen tragen.
 - Manche Werkzeuge unterscheiden sich im **Interaktionsablauf**, nicht nur
-  in der Anordnung (z. B. Unitys „Komponente hinzufügen" vs. UE5s
+  in der Anordnung (z. B. Unitys „Komponente hinzufügen“ vs. UE5s
   Details-Panel). Die brauchen kleine Pro-Preset-Logik, aber diese Logik
   bleibt capability-getrieben (ein Ablauf ist eine geordnete Folge von
   `ecs.*`/`project.*`-Aufrufen) und forkt daher den Kern nicht.

@@ -35,7 +35,7 @@ functions** that lives in-process.
   HTTP endpoints are then *just details* (Ollama :11434,
   llama-server :8080, OpenAI-compatible proxies such as Strata, the
   Anthropic API).
-* **MCP (stays supported):** `re-mcp` exports exactly the same registry
+* **MCP (planned):** `re-mcp` will export exactly the same registry
   outward. Where no direct connection is possible or desired (another
   machine, a third-party app), the AI still drives the editor.
   No engine function is ever written twice.

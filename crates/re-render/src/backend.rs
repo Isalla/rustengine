@@ -28,7 +28,7 @@ pub enum GfxError {
 /// Textur kommt per [`GfxBackend::upload_texture`] unter einer frei
 /// gewaehlten ID — z. B. ein Sprite-Sheet eines Konvertierers, dieses
 /// Crate kennt aber keine Format-Details. `rect` ist das Pixelrechteck
-/// (x, y, breite, hoehe) einer Zelle.
+/// (x, y, Breite, Höhe) einer Zelle.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Sprite {
     pub texture: u64,
@@ -80,7 +80,7 @@ pub trait GfxBackend: Send {
     /// Stream-Zelle in die GPU-Residenz uebernehmen (M3c-Handoff):
     /// ab jetzt zeichnen Batches mit `cell == Some(id)`. Der Aufruf
     /// kommt aus der Upload-Pipeline, nie aus dem Update-Thread.
-    /// Backends ohne GPU-Residenz (Null) duellen den No-op und
+    /// Backends ohne GPU-Residenz (Null) liefern den No-op und
     /// zeichnen Zell-Batches einfach mit.
     fn upload_cell(&mut self, _id: u64, _mesh: &Mesh) -> Result<(), GfxError> {
         Ok(())

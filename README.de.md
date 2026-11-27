@@ -132,5 +132,5 @@ Vermerk und den Lizenztext unverändert übernehmen; siehe [LICENSE](LICENSE).
 
 Eine freundliche Bitte — völlig freiwillig und keine Bedingung: Wenn ein
 Spiel oder Werkzeug mit dieser Engine entsteht, würde ich mich über einen
-Credit freuen („Powered by the RE Rust Engine" im Abspann, ein Link auf
+Credit freuen („Powered by the RE Rust Engine“ im Abspann, ein Link auf
 dieses Repository oder ein Stern darauf).

@@ -17,7 +17,7 @@
 
 use glam::{Mat4, Vec3};
 
-/// Eine Frustum-Ebene in Normalform: `n·p + d >= 0` heißt „innen".
+/// Eine Frustum-Ebene in Normalform: `n·p + d >= 0` heißt „innen“.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Plane {
     pub n: Vec3,
@@ -90,7 +90,7 @@ impl Frustum {
 /// Pyramide aus minimierten Tiefen (0 = nah, 1 = fern).
 ///
 /// Level 0 ist die Auflösung des Depth-Buffers; jedes folgende Level ist
-/// die 2×2-Min-Reduktion des vorigen („nächste Tiefe der Region"). Die
+/// die 2×2-Min-Reduktion des vorigen („nächste Tiefe der Region“). Die
 /// GPU-Fassung macht dasselbe per Compute/Mip-Generation mit Min-Filter.
 #[derive(Clone, Debug, PartialEq)]
 pub struct HiZPyramid {

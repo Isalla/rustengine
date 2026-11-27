@@ -39,7 +39,7 @@ fn luma2(c: &[f32; 3]) -> f32 {
 ///    e
 /// ```
 // Die AMD-Originalnamen (lA..lE, lenX, dirX) sind Teil der Spiegelung —
-// sie machen den Ze-fuer-Zug-Vergleich mit ffx_fsr1.h moeglich.
+// sie machen den Zug-für-Zug-Vergleich mit ffx_fsr1.h moeglich.
 #[allow(non_snake_case, clippy::too_many_arguments)]
 fn easu_set(dir: &mut [f32; 2], len: &mut f32, w: f32, lA: f32, lB: f32, lC: f32, lD: f32, lE: f32) {
     // Richtung ist die '+'-Differenz; die Laenge holt ihre Groesse aus dem
@@ -213,7 +213,7 @@ pub fn easu(src: &[[f32; 3]], sw: usize, sh: usize, dw: usize, dh: usize) -> Vec
 /// `sharpness_stops` ist AMDs Blendentreppe: 0 = schaerfste Einstellung,
 /// jede weitere Blende halbiert (`linear = 2^-stops`). Die Rausch-
 /// Unterdrueckung (`FSR_RCAS_DENOISE`) ist wie in den meisten
-/// Integrationen deaktiviert — Filmkorn gehoert nach das Scharfen.
+/// Integrationen deaktiviert — Filmkorn gehört hinter das Schärfen.
 // lobeM/lobeF/rcpL spiegeln die Original-Namen aus FsrRcasF.
 #[allow(non_snake_case)]
 pub fn rcas(src: &[[f32; 3]], w: usize, h: usize, sharpness_stops: f32) -> Vec<[f32; 3]> {
@@ -340,7 +340,7 @@ mod tests {
 
     #[test]
     fn easu_kantenuergang_ist_hoechstens_bilinear_breit() {
-        // Kante bei x=8 (16->32, 2x): Bilinear uebergangt 2 Display-Pixel
+        // Kante bei x=8 (16->32, 2x): Bilinear übergeht 2 Display-Pixel
         // je Seite; EASU darf nicht breiter uebergehen (sonst waere es
         // nur Brei) und muss monoton bleiben.
         let src = stufe(16, 16, 0.0, 1.0);

@@ -114,7 +114,7 @@ unten immer spielbar — auch im Browser.
   * **FSR 2/3** (zeitlich + Frame Generation): AMD liefert MIT-lizenzierte
     Shader; Port nach WGSL für alle Plattformen, natives Timing auf
     Desktop.
-  * **FSR 4 / „Redstone"** (ML-Super-Resolution, Ray Regeneration, Frame
+  * **FSR 4 / „Redstone“** (ML-Super-Resolution, Ray Regeneration, Frame
     Generation): quelloffen (MIT), aber hardware-seitig an RDNA 4
     gebunden; nur natives Backend.
   * **XeSS**: läuft über mitgelieferten SPIR-V-Dispatcher; nur natives
@@ -148,7 +148,7 @@ unten immer spielbar — auch im Browser.
   falsch geretargete Texturen namentlich; die Upscaler-Parung des
   Pi-Tiers ist FSR1 (siehe oben).
 
-## 3. Dynamische GI und Reflexionen (M6) — „Lumen-artig"
+## 3. Dynamische GI und Reflexionen (M6) — „Lumen-artig“
 
 Zwei Pfade mit gemeinsamer Anbindung an die Oberflächendaten:
 
@@ -171,8 +171,8 @@ Zwei Pfade mit gemeinsamer Anbindung an die Oberflächendaten:
   Stufe neben dem SDF-Pfad — ohne Ray-Tracing, browserfähig.
 * WebGPU-Stufe: Probes + SSAO/SSR, keine Strahlen; identische
   Materialien, weniger Auflösung der Effekte.
-* Referenzen: „Unreal Engine 5 Best Practices" und
-  „UE5 Performance Optimization Cookbook" für Betriebsparameter;
+* Referenzen: „Unreal Engine 5 Best Practices“ und
+  „UE5 Performance Optimization Cookbook“ für Betriebsparameter;
   Paper-Wissen (The Order: Real-time Global Illumination) fließt als
   Verfahren ein.
 
@@ -180,7 +180,7 @@ Zwei Pfade mit gemeinsamer Anbindung an die Oberflächendaten:
 
 * **Progressiver Pfad-Tracer** als eigener Renderer-Modus (PC/
   Konsolen-Backends): dieselbe Szene, BVH aus dem Streaming-System,
-  viele Samples über Frames; Ziel ist „Offline-Qualität" im Editor für
+  viele Samples über Frames; Ziel ist „Offline-Qualität“ im Editor für
   Bakes und Standbilder — im Spiel läuft weiter der M6-Pfad.
 * **ReSTIR-ähnliche Wichtigkeitsnachverwendung** und zeitliche
   Accumulation gegen Rauschen; danach **Ray Reconstruction** als
@@ -198,7 +198,7 @@ Zwei Pfade mit gemeinsamer Anbindung an die Oberflächendaten:
   Node-Graph im Editor (Niagara-artig, datengetrieben).
 * Screen-Space-Effekte-Bibliothek: Distortion, Hitzeflimmern,
   Explosionen, Treffer-Blitze — Rezept-Sammlung aus dem
-  „UE5 VFX Cookbook" auf eigene Renderer-Begriffe übersetzt.
+  „UE5 VFX Cookbook“ auf eigene Renderer-Begriffe übersetzt.
 * Budgets pro Effekt-Klasse (Anzahl, VRAM, Fills) laufen über die
   Capability-Registry, damit KI und Tools sie einhalten.
 

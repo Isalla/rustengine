@@ -9,7 +9,7 @@
 //! temporale Filter) wird als Daten beschreibbar statt als Code-Zettel.
 //!
 //! Kernideen:
-//! * Pässe deklarieren ihre Ressourcen- Zugriffe ([`Access`]) — der
+//! * Pässe deklarieren ihre Ressourcen-Zugriffe ([`Access`]) — der
 //!   Graph, nicht der Pass, entscheidet über Reihenfolge und Layout.
 //! * [`RenderGraph::compile`] sortiert topologisch (deterministischer
 //!   Tie-Break über den Pass-Namen), verwirft ungenutzte Pässe und
@@ -90,7 +90,7 @@ impl AccessKind {
 
 /// Ein Pass: Name + deklarierter Zugriffe + optionale explizite
 /// Abhängigkeiten (Ordnung, die nicht aus Ressourcen-Flüssen folgt —
-/// z. B. „UI nach TAA", obwohl beide keine gemeinsame Ressource teilen).
+/// z. B. „UI nach TAA“, obwohl beide keine gemeinsame Ressource teilen).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PassDesc {
     pub name: String,
@@ -313,8 +313,8 @@ impl RenderGraph {
 
         // 6. Nutzbare Pässe: alles, was (direkt oder über Ketten) auf
         //    eine persistente Ressource oder eine Present-Ressource
-        //    hinarbeitet, plus deren Transitive Hülle nach hinten.
-        //    Hier: Rückwärts-Erreichbarkeit von „Senken" (Pässe, die
+        //    hinarbeitet, plus deren transitive Hülle nach hinten.
+        //    Hier: Rückwärts-Erreichbarkeit von „Senken“ (Pässe, die
         //    persistentes/Present-Schreibgut erzeugen) — Pässe ohne
         //    Pfad zu einer Senke fallen weg.
         let mut sink = vec![false; self.passes.len()];
