@@ -72,7 +72,7 @@ impl Rect {
 
 /// Farb-Fenster des Themes. Die Namen sind bewusst funktional
 /// („panel“, „accent“), nicht per Preset kopiert: ein Preset-Theme
-/// belegt sie mit seinen Werten (UE5 „Dunkel“ oder unser Orange).
+/// belegt sie mit seinen Werten (etwa unser Rust-Orange).
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ThemeColors {
     pub background: Rgba,
@@ -91,7 +91,7 @@ pub struct ThemeColors {
 
 impl Default for ThemeColors {
     /// Das `default`-Preset: warme Dunkelgraus, Rust-Orange als Akzent
-    /// (docs/editor-ui.md, Abschnitt 2).
+    /// (die eigene Identität der Engine, ADR-0001).
     fn default() -> Self {
         Self {
             background: [0.086, 0.080, 0.074, 1.0],
@@ -164,8 +164,7 @@ impl Default for Theme {
 
 impl Theme {
     /// Label-Lookup mit Rückfall auf die ID selbst (fehlende Labels
-    /// crashen nie — sie zeigen den rohen Namen, wie UE5 es mit
-    /// unübersetzten Keys tut).
+    /// crashen nie — sie zeigen den rohen Namen statt einer Lücke).
     pub fn label<'a>(&'a self, id: &'a str) -> &'a str {
         self.labels.get(id).map(String::as_str).unwrap_or(id)
     }

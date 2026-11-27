@@ -156,8 +156,8 @@ Adressierbarkeit, ein weiteres Mal.
 
 ## Nicht Teil davon (zunächst)
 
-Die Umsetzung beginnt später, sobald die UE5/Unity-Referenz-Screenshots
-vollständig sind (ADR-0001). Dieses ADR legt die Form und die
+Die Umsetzung beginnt später mit den Frontend-Phasen aus ADR-0001.
+Dieses ADR legt die Form und die
 übergreifenden Anforderungen fest (Provenienz, Vorschlag statt Ersetzen,
 engine-bewusster Assistent); es legt keine Widget-Interna und nicht das
 genaue Manifest-Format fest — das entscheiden P1–P3.

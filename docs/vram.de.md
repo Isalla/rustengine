@@ -4,7 +4,7 @@
 
 ## Warum alles in EINEM Programm läuft (Ausgangsproblem)
 
-Typische Arbeitsumgebung: Editor (UE5-artig) + externer Bild→Mesh-Generator
+Typische Arbeitsumgebung: 3D-Editor + externer Bild→Mesh-Generator
 (ComfyUI/Tripo/3D-Gen-Studio) als separate Programme. Auf knappen
 Konsumenten-Karten (12 GB) konkurrieren beide um denselben VRAM — jeder hält seine Reserven
 dauerhaft belegt, der Editor stürzt mit „VRAM zu gering" ab, obwohl gerade

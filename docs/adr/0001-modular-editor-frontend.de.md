@@ -8,9 +8,7 @@
 - **Bezug:** [architecture.de.md](../architecture.de.md),
   [ki-integration.de.md](../ki-integration.de.md) (Regel der doppelten
   Adressierbarkeit), [ADR-0002](0002-authoring-surfaces-and-ai-assistant.de.md)
-  (Autor-Oberflächen auf diesem Frontend),
-  [editor-ui.de.md](../editor-ui.de.md) (Preset-Identität,
-  Referenz-Satz, offene Lücken), Roadmap M4 (Editor)
+  (Autor-Oberflächen auf diesem Frontend), Roadmap M4 (Editor)
 
 ## Kontext
 
@@ -79,7 +77,7 @@ eigene Presets sind einfach weitere Daten.
 
 - Ein zweites Layout (Unity) ist überwiegend **Daten**, kein Code: dieselben
   Panels umsortieren, Menüs umbenennen, Theme tauschen.
-- Referenz-Screenshots (UE5, Unity, …) sind die **Spezifikation eines
+- Der Look eines Fremd-Tools ist die **Spezifikation seines optionalen
   Presets**, nicht Input in den Engine-Kern — saubere Trennung, und der
   Kern ändert sich nie, wenn sich ein Layout ändert.
 - Jedes Preset ist automatisch von der Agentin steuerbar, weil seine
@@ -110,16 +108,12 @@ eigene Presets sind einfach weitere Daten.
   eines Fremd-Werkzeugs. Kostet gegenüber Hartcodieren kaum Mehr-
   arbeit, weil die Capabilities schon existieren.
 - **P2 — das `ue5`-Preset extrahieren** als optionalen Look für
-  Umsteiger von Unreal. Die UE5-Referenz-Screenshots werden seine
-  Spezifikation (Menüreihenfolge, Panel-Position, deutsche Labels).
+  Umsteiger von Unreal (Menüreihenfolge, Panel-Position, deutsche Labels).
 - **P3 — das `unity`-Preset ergänzen** als zweites Manifest + Theme;
   Preset-Auswahl beim Start; später nutzer-eigene Manifeste.
 
 ## Nicht Teil davon (zunächst)
 
-Die UE5-Referenz-Screenshots sind am 2026-11-26 geliefert — die
-Umsetzung ist damit freigegeben und startet mit P1. Das Inventar des
-Satzes und die Lücken, die er noch hat, stehen in
-[editor-ui.de.md](../editor-ui.de.md). Dieses ADR legt die *Form* fest,
+Die Umsetzung startet mit P1. Dieses ADR legt die *Form* fest,
 in die die Umsetzung passen muss; das Manifest-Dateiformat entscheidet
 P1.

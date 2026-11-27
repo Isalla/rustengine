@@ -144,8 +144,8 @@ again.
 
 ## Out of scope (for now)
 
-Implementation begins later, once the UE5/Unity reference screenshots are
-complete (ADR-0001). This ADR fixes the shape and the cross-cutting
+Implementation begins later, alongside the frontend phases of ADR-0001.
+This ADR fixes the shape and the cross-cutting
 requirements (provenance, suggest-not-apply, engine-aware assistant); it
 does not fix widget internals or the exact manifest format, which P1–P3
 will finalize.

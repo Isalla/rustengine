@@ -4,7 +4,7 @@ English | [Deutsch](vram.de.md)
 
 ## Why everything runs in ONE program (the starting problem)
 
-Typical working environment: editor (UE5-style) + an external
+Typical working environment: a 3D editor + an external
 image→mesh generator (ComfyUI/Tripo/3D-Gen-Studio) as separate
 programs. On scarce consumer cards (12 GB) both compete for the same
 VRAM — each keeps its reserves permanently occupied, the editor crashes

@@ -8,8 +8,8 @@
 //!
 //! Doktrin:
 //! - **Pixel-Rasterung**: Jedes Widget rastet sein Rechteck auf
-//!   ganzzahlige Pixelkanten ein ([`snap`]) — die Konvention aus
-//!   docs/editor-ui.md §6, damit CPU-Referenz und Hardware-Rasterizer
+//!   ganzzahlige Pixelkanten ein ([`snap`]) — die Konvention des
+//!   UI-Kerns, damit CPU-Referenz und Hardware-Rasterizer
 //!   nie divergieren.
 //! - **Theme allein**: Farben, Abstände, Schriften kommen aus dem
 //!   [`Theme`](super::Theme); Widgets kennen keinen hartcodierten Look

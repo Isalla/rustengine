@@ -85,8 +85,7 @@ honest state of repair. ✅ done and test-covered · 🟡 partially built ·
 - [ ] Editor frontend P1: widget toolkit (draw list, text atlas, input
       routing, docking manifest, theme) + the `default` preset with the
       engine's own identity — data-driven per ADR-0001; the `ue5`
-      preset (P2) follows from the reference set
-      ([editor-ui](editor-ui.md))
+      preset (P2) follows later
 - [ ] More file formats (breadth over single-tool migration):
       registry-driven importers/exporters — FBX (meshes & animation),
       OBJ legacy and USD (scene interchange) on top of the existing

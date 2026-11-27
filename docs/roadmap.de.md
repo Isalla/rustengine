@@ -88,8 +88,7 @@ mit ehrlichem Haken-Stand. ✅ fertig und testabgedeckt · 🟡 teilweise gebaut
 - [ ] Editor-Frontend P1: Widget-Toolkit (Draw-List, Text-Atlas,
       Input-Routing, Docking-Manifest, Theme) + das `default`-Preset mit
       eigener Identität der Engine — datengetrieben nach ADR-0001; das
-      `ue5`-Preset (P2) folgt aus dem Referenz-Satz
-      ([editor-ui.de](editor-ui.de.md))
+      `ue5`-Preset (P2) folgt später
 - [ ] Mehr Dateiformate (Breite statt Einzel-Tool-Migration):
       registrgesteuerte Importierer/Exportierer — FBX (Meshes &
       Animationen), OBJ-Legat und USD (Szenen-Austausch) zusätzlich zum
