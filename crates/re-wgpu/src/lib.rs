@@ -273,6 +273,8 @@ struct MeshGpu {
     index: Option<wgpu::Buffer>,
     n_vertices: u32,
     n_indices: u32,
+    /// Content stamp of the uploaded CPU mesh (see `re_core::mesh::Mesh::stamp`).
+    stamp: u64,
 }
 
 struct Inner {
@@ -933,8 +935,11 @@ impl Inner {
 
 impl Inner {
     fn ensure_mesh(&mut self, mesh: &Mesh) {
+        // Key is the address, validity is the content stamp: in-place edits
+        // (terrain brush, decimate) refresh the stamp, and a fresh mesh that
+        // inherits this address gets a new one — both force a re-upload.
         let key = (mesh as *const Mesh) as usize;
-        if self.mesh_cache.contains_key(&key) {
+        if self.mesh_cache.get(&key).is_some_and(|g| g.stamp == mesh.stamp) {
             return;
         }
         let gpu = self.upload_mesh_gpu(mesh);
@@ -972,6 +977,7 @@ impl Inner {
             index: None,
             n_vertices: mesh.positions.len() as u32,
             n_indices: 0,
+            stamp: mesh.stamp,
         };
         if let Some(idx) = mesh.indices.as_ref().filter(|v| !v.is_empty()) {
             let b = self.device.create_buffer(&wgpu::BufferDescriptor {

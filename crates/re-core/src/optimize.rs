@@ -123,6 +123,7 @@ pub fn decimate_to_ratio(mesh: &mut Mesh, ratio: f32) -> (usize, usize) {
     }
     let after = best.triangle_count();
     *mesh = best;
+    mesh.touch();
     (before, after)
 }
 
@@ -130,7 +131,10 @@ pub fn decimate_to_ratio(mesh: &mut Mesh, ratio: f32) -> (usize, usize) {
 /// Returns whether anything was removed.
 pub fn remove_uvs(mesh: &mut Mesh) -> bool {
     let had = mesh.uvs.is_some();
-    mesh.uvs = None;
+    if had {
+        mesh.uvs = None;
+        mesh.touch();
+    }
     had
 }
 

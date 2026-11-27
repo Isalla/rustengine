@@ -12,7 +12,7 @@
 //!   UI-Kerns, damit CPU-Referenz und Hardware-Rasterizer
 //!   nie divergieren.
 //! - **Theme allein**: Farben, Abstände, Schriften kommen aus dem
-//!   [`Theme`](super::Theme); Widgets kennen keinen hartcodierten Look
+//!   [`Theme`]; Widgets kennen keinen hartcodierten Look
 //!   (ADR-0001).
 //! - **Kein Engine-Aufruf**: Widgets liefern Ereignisse
 //!   (clicked/edited/toggled); die Editor-Schicht bindet sie an

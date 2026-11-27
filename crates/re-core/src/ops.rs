@@ -243,6 +243,7 @@ pub fn auto_bind(p: &mut Project, mesh_node: NodeId, skel_node: NodeId) -> Resul
             weights,
         });
     }
+    mesh.touch();
     // remember the binding on the node too
     if let Some(NodeKind::MeshInstance { skeleton_node, .. }) = p.scene.get_mut(mesh_node).map(|n| &mut n.kind) {
         *skeleton_node = Some(skel_node);

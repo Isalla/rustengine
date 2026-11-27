@@ -103,7 +103,7 @@ pub fn water_mesh(name: &str, size_x: f32, size_z: f32) -> Mesh {
         normals: Some(vec![[0.0, 1.0, 0.0]; 4]),
         uvs: Some(vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]),
         indices: Some(vec![0, 2, 1, 0, 3, 2]), // +Y facing, but double-sided anyway
-        skin: None,
+        ..Default::default()
     };
     mesh.compute_normals();
     mesh
@@ -169,6 +169,7 @@ pub fn brush(
         }
     }
     mesh.compute_normals();
+    mesh.touch();
     touched.len()
 }
 
@@ -336,6 +337,7 @@ pub fn resample_grid(mesh: &mut Mesh, new_segments: usize) -> bool {
     }
     out.compute_normals();
     *mesh = out;
+    mesh.touch();
     true
 }
 

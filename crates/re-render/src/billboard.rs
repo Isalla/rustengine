@@ -27,7 +27,7 @@ pub fn unit_quad() -> Mesh {
         normals: Some(vec![[0.0, 0.0, 1.0]; 4]),
         uvs: Some(vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]),
         indices: Some(vec![0, 1, 2, 0, 2, 3]),
-        skin: None,
+        ..Default::default()
     }
 }
 

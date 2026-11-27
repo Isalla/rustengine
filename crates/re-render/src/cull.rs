@@ -154,11 +154,13 @@ impl HiZPyramid {
     }
 
     pub fn level_width(&self, l: u32) -> u32 {
-        (self.width >> l.min(31)).max(1)
+        // ceil, not floor: level l really holds ceil(width / 2^l) texels
+        // (div_ceil chain in `new`) — floor here would read past row ends.
+        self.width.div_ceil(1u32 << l.min(31)).max(1)
     }
 
     pub fn level_height(&self, l: u32) -> u32 {
-        (self.height >> l.min(31)).max(1)
+        self.height.div_ceil(1u32 << l.min(31)).max(1)
     }
 
     /// Level, auf dem ein `w×h` großes Bildschirm-Fenster in genau ein
@@ -253,6 +255,27 @@ mod tests {
         assert_eq!(HiZPyramid::level_for_size(8, 8), 3);
         assert_eq!(HiZPyramid::level_for_size(1024, 1024), 10);
         assert_eq!(HiZPyramid::level_for_size(5, 3), 3); // ceil(log2(5))
+    }
+
+    #[test]
+    fn pyramide_nicht_pot_konsistent_mit_level_geometrie() {
+        // 1280×720 (Pi-Profil): die Level schrumpfen per div_ceil-Kette;
+        // floor-basierte Zugriffswerte lasen über Zeilenenden hinaus.
+        let mut p = HiZPyramid::new(1280, 720);
+        for (l, lv) in p.levels.iter().enumerate() {
+            assert_eq!(
+                lv.len(),
+                (p.level_width(l as u32) * p.level_height(l as u32)) as usize,
+                "Level {l} Geometrie"
+            );
+        }
+        // Einheitliche Tiefe muss bis ins oberste Level durchschlagen,
+        // ohne veraltete 1.0-Ränder zu hinterlassen.
+        let depth = vec![0.5; 1280 * 720];
+        p.build_from_depth(&depth);
+        for lv in &p.levels {
+            assert!(lv.iter().all(|&d| d == 0.5), "veraltete Texel nach build");
+        }
     }
 
     #[test]

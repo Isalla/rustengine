@@ -12,9 +12,16 @@ pub struct Skin {
     pub weights: Vec<[f32; 4]>,
 }
 
+/// Globally unique stamp for GPU-mirror invalidation (see [`Mesh::stamp`]).
+pub fn new_mesh_stamp() -> u64 {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT: AtomicU64 = AtomicU64::new(1);
+    NEXT.fetch_add(1, Ordering::Relaxed)
+}
+
 /// A triangle-list mesh with optional vertex attributes and skin weights.
 /// 2D elements are meshes lying on the XY plane (normals +Z).
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Mesh {
     pub name: String,
     pub positions: Vec<[f32; 3]>,
@@ -27,9 +34,46 @@ pub struct Mesh {
     pub indices: Option<Vec<u32>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub skin: Option<Skin>,
+    /// CPU→GPU invalidation stamp: unique at creation, refreshed by
+    /// [`Mesh::touch`] on every in-place edit. GPU mirrors key their buffers
+    /// on it so edits and address reuse (ABA) force a re-upload. Never
+    /// serialized, never compared for equality.
+    #[serde(skip, default = "new_mesh_stamp")]
+    pub stamp: u64,
+}
+
+impl Default for Mesh {
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            positions: Vec::new(),
+            normals: None,
+            uvs: None,
+            indices: None,
+            skin: None,
+            stamp: new_mesh_stamp(),
+        }
+    }
+}
+
+impl PartialEq for Mesh {
+    fn eq(&self, other: &Self) -> bool {
+        self.name == other.name
+            && self.positions == other.positions
+            && self.normals == other.normals
+            && self.uvs == other.uvs
+            && self.indices == other.indices
+            && self.skin == other.skin
+    }
 }
 
 impl Mesh {
+    /// Mark the content as edited in place: every GPU mirror must
+    /// re-upload this mesh before drawing it again.
+    pub fn touch(&mut self) {
+        self.stamp = new_mesh_stamp();
+    }
+
     pub fn vertex_count(&self) -> usize {
         self.positions.len()
     }

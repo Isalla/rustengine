@@ -1889,16 +1889,17 @@ impl Deferred {
         })
     }
 
-    /// Mesh in die GPU-Residenz legen (eigener Cache über Zeiger-Key wie
-    /// im Forward-Pfad; TODO(M1c): stabile Asset-IDs).
+    /// Mesh in die GPU-Residenz legen (gleicher Cache wie der Forward-Pfad;
+    /// Zeiger-Key + Inhalts-Stamp, damit In-Place-Edits neu hochladen).
     fn upload_mesh(&mut self, inner: &mut Inner, mesh: &Mesh) -> MeshGpu {
         let key = (mesh as *const Mesh) as usize;
-        if let Some(gpu) = inner.mesh_cache.get(&key) {
+        if let Some(gpu) = inner.mesh_cache.get(&key).filter(|g| g.stamp == mesh.stamp) {
             return MeshGpu {
                 vertex: gpu.vertex.clone(),
                 index: gpu.index.clone(),
                 n_vertices: gpu.n_vertices,
                 n_indices: gpu.n_indices,
+                stamp: gpu.stamp,
             };
         }
         let mut verts = Vec::with_capacity(mesh.positions.len());
@@ -1929,6 +1930,7 @@ impl Deferred {
             index: None,
             n_vertices: mesh.positions.len() as u32,
             n_indices: 0,
+            stamp: mesh.stamp,
         };
         if let Some(idx) = mesh.indices.as_ref().filter(|v| !v.is_empty()) {
             let b = inner.device.create_buffer(&wgpu::BufferDescriptor {
@@ -1946,6 +1948,7 @@ impl Deferred {
             index: gpu.index.clone(),
             n_vertices: gpu.n_vertices,
             n_indices: gpu.n_indices,
+            stamp: gpu.stamp,
         });
         gpu
     }

@@ -186,7 +186,7 @@ impl Importer {
                         normals,
                         uvs,
                         indices,
-                        skin: None,
+                        ..Default::default()
                     };
                     if wmesh.normals.is_none() {
                         wmesh.compute_normals();

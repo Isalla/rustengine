@@ -209,6 +209,15 @@ pub fn capsule(radius: f32, height: f32, segments: u32) -> Mesh {
         band.push_v([t.cos() * radius, cyl_h / 2.0, t.sin() * radius], [t.cos(), 0.0, t.sin()], [0.0, 0.0]);
         band.push_v([t.cos() * radius, -cyl_h / 2.0, t.sin() * radius], [t.cos(), 0.0, t.sin()], [0.0, 0.0]);
     }
+    // quad strip around the band: ring s = (2s top, 2s+1 bottom)
+    {
+        let idx = band.indices.as_mut().unwrap();
+        for s in 0..seg {
+            let (t0, b0) = (2 * s as u32, 2 * s as u32 + 1);
+            let (t1, b1) = (t0 + 2, b0 + 2);
+            idx.extend_from_slice(&[t0, b0, t1, t1, b0, b1]);
+        }
+    }
     merge(&mut mesh, band);
     mesh
 }
@@ -289,5 +298,28 @@ fn merge(base: &mut Mesh, other: Mesh) {
         let bi = base.indices.get_or_insert_with(Vec::new);
         bi.reserve(i.len());
         bi.extend(i.into_iter().map(|v| v + off));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::BTreeSet;
+
+    #[test]
+    fn capsule_band_is_triangulated() {
+        let m = capsule(0.5, 3.0, 8);
+        let idx = m.indices.clone().unwrap();
+        assert_eq!(idx.len() % 3, 0);
+        assert!(idx.iter().all(|&i| (i as usize) < m.positions.len()), "Index außerhalb");
+        // Die Band-Vertizes (letztes 2*(seg+1)) müssen von Dreiecken
+        // referenziert werden — sonst rendert die Kapsel mit Loch.
+        let first_band = m.positions.len() - 2 * (8 + 1);
+        let referenced: BTreeSet<u32> = idx.iter().copied().collect();
+        for v in first_band..m.positions.len() {
+            assert!(referenced.contains(&(v as u32)), "Band-Vertiz {v} ohne Dreieck");
+        }
+        let (min, max) = m.aabb();
+        assert!((max[1] - min[1] - 3.0).abs() < 1e-3, "Kapsel überspannt nicht die Höhe");
     }
 }

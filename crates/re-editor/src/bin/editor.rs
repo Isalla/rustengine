@@ -91,9 +91,12 @@ fn decode_chunk(key: CellKey, bytes: &[u8]) -> Result<Chunk, String> {
 fn seed_blocks(store: &re_world::FileStore, _clip: &re_world::Clipmap, x0: f64, x1: f64, z0: f64, z1: f64) -> usize {
     let mut blocks = 0usize;
     let step = BASE_CELL;
-    let mut x = x0;
+    // Align to the cell grid: the streamer asks for floor_div(world/cell),
+    // so blocks must start on multiples of `step` and be keyed by floor,
+    // not round — round keys shifted every block by up to half a cell.
+    let mut x = (x0 / step).floor() * step;
     while x < x1 {
-        let mut z = z0;
+        let mut z = (z0 / step).floor() * step;
         while z < z1 {
             let mut bytes = vec![0u8; BLOCK_BYTES];
             for j in 0..SIDE {
@@ -105,7 +108,7 @@ fn seed_blocks(store: &re_world::FileStore, _clip: &re_world::Clipmap, x0: f64, 
                     bytes[off..off + 4].copy_from_slice(&h.to_le_bytes());
                 }
             }
-            let key = re_world::CellKey { level: 0, x: (x / step).round() as i64, y: (z / step).round() as i64 };
+            let key = re_world::CellKey { level: 0, x: (x / step).floor() as i64, y: (z / step).floor() as i64 };
             store.write_block(key, &bytes).ok();
             blocks += 1;
             z += step;
