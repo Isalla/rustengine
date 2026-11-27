@@ -33,6 +33,11 @@ telemetry and the mid-flight strategy↔first-person control handoff,
 demonstrated end-to-end by the `stream-demo` fly-over. The editor (M4)
 is next; audio/physics follow milestone by milestone (see below).
 
+**Privacy:** no telemetry, no phone-home, no update checks. Engine
+binaries only ever contact endpoints a human explicitly supplied, and
+the word "telemetry" inside this repo means local performance counters
+([ADR-0004](docs/adr/0004-no-telemetry-no-phone-home.md)).
+
 ## Crates
 
 | Crate | Purpose | Status |

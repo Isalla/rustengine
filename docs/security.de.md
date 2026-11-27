@@ -48,6 +48,8 @@ Nach realer Exposition sortiert, nicht nach Theorie:
       spec-brechenden glTF-Dateien; kein Panic, kein OOM, kein Timeout
       (braucht cargo-fuzz — vor der Installation fragen)
 - [ ] `cargo audit` + `cargo deny` über dem Lockfile
+- [ ] Phone-Home-Scan (`scripts/check-phone-home.sh`): keine HTTP-/TLS-/
+      Websocket-/Analytics-Clients im Abhängigkeitsgraphen (ADR-0004)
 - [ ] `unsafe`-Audit: jeder Block mit SAFETY-Kommentar; die Zahl darf
       zwischen Meilensteinen nicht still wachsen
 - [ ] Capability-Registry: jedes Tool auflisten, Input-Validierung und

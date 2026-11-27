@@ -34,6 +34,12 @@ mitten im Flug, demonstriert vom `stream-demo`-Rundflug. Als nächstes
 folgt der Editor (M4), Audio/Physik Meilenstein für Meilenstein
 (siehe unten).
 
+**Privatsphäre:** keine Telemetrie, kein Phone-Home, keine
+Update-Checks. Engine-Binaries kontaktieren ausschließlich Endpunkte,
+die ein Mensch ausdrücklich gesetzt hat; wo in diesem Repo „Telemetrie"
+steht, sind lokale Leistungszähler gemeint
+([ADR-0004](docs/adr/0004-no-telemetry-no-phone-home.de.md)).
+
 ## Crates
 
 | Crate | Zweck | Status |

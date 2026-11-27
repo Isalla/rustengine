@@ -33,3 +33,6 @@ jobs:
 
       - name: Headless backend build
         run: cargo build -p re-wgpu --no-default-features
+
+      - name: No phone-home dependencies (ADR-0004)
+        run: sh scripts/check-phone-home.sh

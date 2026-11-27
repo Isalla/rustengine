@@ -12,5 +12,6 @@ icon.png
 docs/handbook/*/book/
 _site/
 
-# Persönliche Notizen — niemals ins Repo
-docs/gedanke.txt
+# Persönliche Notizen — niemals ins Repo (gleicher Name, egal wo)
+gedanke.txt
+docs/gedanke*.txt
