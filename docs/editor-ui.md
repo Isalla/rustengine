@@ -63,12 +63,16 @@ material, not a shipped asset).
 | `UE5_17.png` | opened toolbar dropdown (view mode) + white hover tooltip |
 | `UE5_18.png` | viewport-tab context menu (checkmarks, disabled entries, section labels) |
 | `Bewegungseditor*.png` | sequencer reference for M11: track view (ruler, playhead, key diamonds, camera track), tool rail with icon+text flyout grids (selected = blue), modal message box ("NumLock aktiviert") |
-| `UE5_19.png` | Content Drawer expanded (bottom shelf): asset tiles, folder tree with search, filter bar, view toggles; Details panel as real tree (category headers with expand arrows, property rows with reset icons, enum dropdown, gear menu); dark icon tooltip ("Aktuelle Auswahl löschen") |
+| `UE5_19.png` | **detached (floating) panel**: Content Browser torn out of the editor — own OS title bar with min/max/close, own tab row, floating beside the main window over the desktop; Output Log expanded underneath |
 | `cmd.png` | console type selector (Cmd / Python / Python (REPL)) with checkmark — the console entry point |
 | `Editordiagnose.png` | modal dialog window: title bar with close button, tab pills (Alles anzeigen / Nur Warnungen), gear menu, table with column headers (Aktuell / Expected / Fehlschläge / Notify), section rows, checkbox column, status-colored values; left icon rail with text buttons (selected = blue) |
 | `Trace-Objekt_1/2.png` | rich toolbar dropdown: search field, small-caps section labels, radio items (filled dot), checkbox items, shortcut column, disabled items, **focused text input (blue border)**, combo box, **submenu flyout** with hover highlight (blue), white tooltip anchored above the menu |
 | `Zen-Server.png` | status-bar dropdown with section labels + second-level submenu (icon entries), hover highlight |
 | `revisionskontrolle.png` | status-bar menu with a disabled entry (prohibiting icon) and tooltip anchored above the menu |
+| `UE5_20_farbpicker.png` | **Details color picker** opened from a property row: color wheel, value + saturation sliders, RGB sliders, HSV sliders, hex field, preset swatch grid, eyedropper/invert icons, per-channel reset arrows, OK / Cancel |
+| `UE5_21_enumdropdown.png` | **enum dropdown opened** (viewport projection mode): current item marked with a checkmark, shortcut column, small-caps section labels, live numeric fields inside the menu, **submenu flyouts** with arrows |
+| `UE5_22_playoverlay.png` | **play mode**: viewport switched to the game view, toolbar play controls replaced by pause/skip/stop, on-screen overlay text ("Spieler [U] wird gestartet" + hint line), and a background-task notification with spinner ("Offener Vorgang: Lichtbuild bearbeiten …") |
+| `UE5_23_console_autocomplete.png` | **console autocomplete list**: 20 matching cvars above the focused input, each with a category letter icon, common prefix kept, differing tail highlighted |
 
 Interaction states the set now proves: hover/selected (blue),
 disabled (gray, with prohibiting icon), tooltip (white box, also
@@ -79,23 +83,60 @@ context-menu search, inline text edit with selection, focused text
 input (accent border), radio items, checkbox items and checkbox table
 columns, combo box, checkmark menu items, colored log lines, asset
 hover cards, modal message box, modal dialog window with table,
-tab pills, content-drawer tile shelf.
+tab pills, content-drawer tile shelf, **detached floating window**,
+**color picker dialog**, **enum dropdown with checkmark + shortcuts +
+live fields**, **console autocomplete list**, **play-mode overlay text
+and background-task notification**.
 
 ## 4. Gaps — still missing from the reference set
 
-The delivered set now covers every core widget and every menu form.
-What remains is polish detail; the toolkit and the `ue5` preset can
-both proceed:
+Closed on 2026-11-27 (second capture pass, `.share/referenz/ue5-ui/`):
+console autocomplete (`UE5_23_console_autocomplete.png`), Details color
+picker (`UE5_20_farbpicker.png`), enum dropdown (`UE5_21_enumdropdown.png`),
+play-mode overlay (`UE5_22_playoverlay.png`), detached floating panel
+(`UE5_19.png`).
 
-1. **Command palette / console autocomplete** — `cmd.png` shows the
-   console type selector, but not the autocomplete dropdown list.
-2. **Floating panel + dock drop hints** — detached title bar, tab drag
-   ghost, drop-target lines (no shot shows a floating drag state).
-3. **Details color picker + value drag** — the enum dropdown and reset
-   icons are covered by `UE5_19`; the color swatch popup is not.
-4. **Progress dialog** (a modal dialog window is now proven by
-   `Editordiagnose.png`, just not the progress-bar variant).
-5. Play-mode overlay in the viewport (optional).
+What is left, and why it is the end of what a screenshot pass can add:
+
+1. **Dock drop hints while dragging** — the detached title bar is proven
+   (`UE5_19`), the drop-target lines are not reachable: the automation
+   drag is atomic (down→move→up without releasing the game thread), so
+   no frame exists between press and release to capture.
+2. **Details value drag** (scrubbing a number) — same atomic-input cause;
+   the drag itself is the state to photograph.
+3. **Progress dialog** — no side-effect-free trigger exists. A Live
+   Coding compile reports `CompileNotStarted` (disabled in this project),
+   a cvar change recompiles from cache with no visible bar, and the
+   remaining triggers (save-all, lighting build, plugin install) all
+   mutate the project. The background-task notification with spinner in
+   `UE5_22_playoverlay.png` is the closest honest substitute.
+
+### 4.1 What the UE5.8 MCP surface cannot reach (capture doctrine)
+
+Recorded so a future pass does not rediscover them:
+
+- **Widget refs are session-local.** Every MCP session renumbers them,
+  so resolve → click → capture must happen inside one session.
+- **The Details panel is only in the accessibility tree when its tab is
+  active and something is selected.** An inactive tab contributes
+  nothing, which reads as "the panel is inaccessible" when it is not.
+- **Small enums render as segmented buttons, not dropdowns** (Actor
+  mobility: Statisch/Stationär/Beweglich inline). A dropdown needs an
+  enum with enough values — the projection-mode combo shows the real
+  dropdown form.
+- **Property rows are single flattened nodes** with no child widgets, so
+  a center click can land on the label and raise a tooltip instead of
+  the editor. Value cells need a coordinate click.
+- **Modal dialogs ignore synthetic clicks** (the color picker's Cancel
+  never fired). They are real OS windows: close them with `WM_CLOSE`.
+- **Transient popups die when captured.** The image tool takes focus and
+  closes menus; grab the screen region with GDI instead.
+- **The menu-bar command search is not in the accessibility tree**, and
+  its result popup does not survive automation-driven typing. Ctrl+Space
+  is unbound in this build. The console autocomplete
+  (`UE5_23_console_autocomplete.png`) is the reachable equivalent.
+- **No absolute-coordinate click and no context-menu key** in the
+  inspector toolset; anything needing those is out of reach by design.
 
 Icons: the screenshots show menu icons too small to extract as
 vectors. Per ADR-0001 icon fidelity is art effort carried by the

@@ -64,12 +64,16 @@ kein ausgeliefertes Asset).
 | `UE5_17.png` | geöffnetes Toolbar-Dropdown (Anzeigemodus) + weißer Hover-Tooltip |
 | `UE5_18.png` | Kontext-Menü des Viewport-Tabs (Häkchen, deaktivierte Einträge, Sektions-Labels) |
 | `Bewegungseditor*.png` | Sequencer-Referenz für M11: Spur-Ansicht (Lineal, Playhead, Key-Rauten, Kamera-Spur), Icon-Schiene mit Icon+Text-Flyout-Rastern (ausgewählt = blau), modale Message-Box („NumLock aktiviert") |
-| `UE5_19.png` | Content-Drawer ausgeklappt (unteres Regal): Asset-Kacheln, Ordner-Baum mit Suche, Filter-Leiste, Ansichtsumschalter; Details-Panel als echter Baum (Kategorie-Köpfe mit Aufklapp-Pfeilen, Eigenschafts-Zeilen mit Reset-Icons, Enum-Dropdown, Zahnrad-Menü); dunkler Icon-Tooltip („Aktuelle Auswahl löschen") |
+| `UE5_19.png` | **abgetrenntes (schwebendes) Panel**: Inhaltsbrowser aus dem Editor gerissen — eigener OS-Titelbalken mit Min/Max/Schließen, eigene Tab-Zeile, schwebt neben dem Hauptfenster über dem Desktop; darunter Output-Log ausgeklappt |
 | `cmd.png` | Konsolen-Typ-Auswahl (Cmd / Python / Python (REPL)) mit Häkchen — der Konsolen-Einstieg |
 | `Editordiagnose.png` | modaler Dialog als Fenster: Titelbalken mit Schließen-Knopf, Tab-Pills (Alles anzeigen / Nur Warnungen), Zahnrad-Menü, Tabelle mit Spaltenköpfen (Aktuell / Expected / Fehlschläge / Notify), Sektions-Zeilen, Checkbox-Spalte, status-gefärbte Werte; linke Icon-Schiene mit Text-Knöpfen (ausgewählt = blau) |
 | `Trace-Objekt_1/2.png` | reichhaltiges Toolbar-Dropdown: Suchfeld, Kleinkapett-Sektions-Labels, Radio-Einträge (gefüllter Punkt), Checkbox-Einträge, Shortcut-Spalte, deaktivierte Einträge, **fokusiertes Textfeld (blauer Rand)**, Combo-Box, **Untermenü-Flyout** mit Hover-Hervorhebung (blau), weißer Tooltip über dem Menü |
 | `Zen-Server.png` | Statusleisten-Dropdown mit Sektions-Labels + ZweitEbene-Untermenü (Icon-Einträge), Hover-Hervorhebung |
 | `revisionskontrolle.png` | Statusleisten-Menü mit deaktiviertem Eintrag (Verbots-Icon) und Tooltip über dem Menü |
+| `UE5_20_farbpicker.png` | **Details-Farb-Picker** geöffnet aus einer Eigenschafts-Zeile: Farbkreis, Wert- und Sättigungs-Regler, RGB-Regler, HSV-Regler, Hex-Feld, Voreinstellungs-Fächerraster, Pipetten/Invertieren-Icons, Reset-Pfeile je Kanal, OK / Abbrechen |
+| `UE5_21_enumdropdown.png` | **geöffnetes Enum-Dropdown** (Viewport-Projektionsmodus): aktueller Eintrag mit Häkchen, Shortcut-Spalte, Kleinkapett-Sektions-Labels, lebende Zahlenfelder im Menü, **Untermenü-Flyouts** mit Pfeilen |
+| `UE5_22_playoverlay.png` | **Play-Modus**: Viewport auf Spielansicht umgeschaltet, Play-Regler der Toolbar durch Pause/Überspringen/Stopp ersetzt, Overlay-Text im Bild („Spieler [U] wird gestartet" + Hinweiszeile), dazu Hintergrund-Vorgangs-Meldung mit Spinner („Offener Vorgang: Lichtbuild bearbeiten …") |
+| `UE5_23_console_autocomplete.png` | **Konsolen-Autovervollständigungs-Liste**: 20 passende CVars über dem fokussierten Eingabefeld, je mit Kategorie-Buchstaben-Icon, gemeinsamer Präfix gleich, abweichender Schwanz hervorgehoben |
 
 Bewiesene Interaktions-Zustände: Hover/ausgewählt (blau), deaktiviert
 (grau, mit Verbots-Icon), Tooltip (weiße Box, auch über Menüs verankert;
@@ -80,26 +84,69 @@ Inline-Textbearbeitung mit Auswahl, fokusiertes Textfeld (Akzent-Rand),
 Radio-Einträge, Checkbox-Einträge und Checkbox-Tabellenspalten,
 Combo-Box, Häkchen-Menüpunkte, farbige Log-Zeilen, Asset-Hover-Karten,
 modale Message-Box, modaler Dialog mit Tabelle, Tab-Pills,
-Content-Drawer-Kachel-Regal.
+Content-Drawer-Kachel-Regal, **abgetrenntes schwebendes Fenster**,
+**Farb-Picker-Dialog**, **Enum-Dropdown mit Häkchen + Shortcuts +
+lebenden Feldern**, **Konsolen-Autovervollständigung**,
+**Play-Mode-Overlay-Text und Hintergrund-Vorgangs-Meldung**.
 
 ## 4. Lücken — im Referenz-Satz noch fehlt
 
-Der gelieferte Satz deckt jetzt alle Kern-Widgets und alle Menü-Formen.
-Was bleibt, ist Feinarbeit; Toolkit und `ue5`-Preset können beide
-weitermachen:
+Am 2026-11-27 geschlossen (zweiter Aufnahmelauf, `.share/referenz/ue5-ui/`):
+Konsolen-Autovervollständigung (`UE5_23_console_autocomplete.png`),
+Details-Farb-Picker (`UE5_20_farbpicker.png`), Enum-Dropdown
+(`UE5_21_enumdropdown.png`), Play-Mode-Overlay (`UE5_22_playoverlay.png`),
+abgetrenntes schwebendes Panel (`UE5_19.png`).
 
-1. **Command-Palette / Konsolen-Autovervollständigung** — `cmd.png`
-   zeigt die Konsolen-Typ-Auswahl, aber nicht die Vervollständigungs-
-   Liste.
-2. **Schwebendes Panel + Dock-Drop-Hinweise** — abgetrennter
-   Titelbalken, Tab-Zieh-Ghost, Drop-Ziel-Linien (kein Bild zeigt
-   einen Schweb-Zieh-Zustand).
-3. **Details-Farb-Picker + Wert-Drag** — Enum-Dropdown und Reset-Icons
-   deckt `UE5_19` ab; das Farb-Fenster fehlt.
-4. **Fortschritts-Dialog** (ein modaler Dialog ist jetzt durch
-   `Editordiagnose.png` bewiesen, nur nicht die Fortschrittsbalken-
-   Variante).
-5. Play-Mode-Overlay im Viewport (optional).
+Was bleibt — und warum es das Ende dessen ist, was ein Aufnahmelauf
+holen kann:
+
+1. **Dock-Drop-Hinweise während des Ziehens** — der abgetrennte
+   Titelbalken ist bewiesen (`UE5_19`), die Drop-Ziel-Linien sind nicht
+   erreichbar: der Automatisierungs-Drag ist atomar (down→move→up ohne
+   den Game-Thread freizugeben), es gibt also keinen Frame zwischen
+   Drücken und Loslassen, den man aufnehmen könnte.
+2. **Wert-Drag in den Details** (eine Zahl scrubben) — dieselbe
+   atomare Eingabeursache; der Drag selbst ist der aufzunehmende Zustand.
+3. **Fortschritts-Dialog** — kein Auslöser ohne Nebenwirkung. Ein
+   Live-Coding-Compile meldet `CompileNotStarted` (in diesem Projekt
+   deaktiviert), eine CVar-Änderung kompiliert aus dem Cache ohne
+   sichtbaren Balken, und die verbleibenden Auslöser (alle speichern,
+   Lichtbuild, Plugin-Installation) verändern das Projekt. Die
+   Hintergrund-Vorgangs-Meldung mit Spinner in
+   `UE5_22_playoverlay.png` ist der nächstliegende ehrliche Ersatz.
+
+### 4.1 Was die UE5.8-MCP-Oberfläche nicht erreicht (Aufnahme-Doktrin)
+
+Notiert, damit ein künftiger Lauf das nicht neu herausfindet:
+
+- **Widget-Refs sind session-lokal.** Jede MCP-Session nummeriert sie
+  neu, also muss Auflösen → Klicken → Aufnehmen in einer Session
+  passieren.
+- **Das Details-Panel steckt nur dann im Barrierefreiheitsbaum, wenn
+  sein Tab aktiv ist und etwas ausgewählt ist.** Ein inaktiver Tab trägt
+  nichts bei — was als „Panel ist nicht zugänglich" gelesen wird, wenn
+  es das nicht ist.
+- **Kleine Enums rendern als Segment-Buttons, nicht als Dropdown**
+  (Actor-Mobilität: Statisch/Stationär/Beweglich inline). Ein Dropdown
+  braucht ein Enum mit genug Werten — das Projektionsmodus-Feld zeigt
+  die echte Dropdown-Form.
+- **Eigenschafts-Zeilen sind einzelne flache Knoten** ohne Kind-Widgets;
+  ein Klick in die Mitte kann das Label treffen und einen Tooltip
+  auslösen statt des Editier-Felds. Wert-Zellen brauchen einen
+  Koordinaten-Klick.
+- **Modale Dialoge ignorieren synthetische Klicks** (Abbrechen im
+  Farb-Picker feuerte nie). Es sind echte OS-Fenster: mit `WM_CLOSE`
+  schließen.
+- **Flüchtige Popups sterben beim Aufnehmen.** Das Bild-Tool nimmt Fokus
+  und schließt Menüs; stattdessen den Bildschirmbereich per GDI greifen.
+- **Die Menüleisten-Befehlssuche steckt nicht im Barrierefreiheitsbaum**,
+  und ihr Ergebnis-Popup überlebt automatisierte Eingaben nicht.
+  Strg+Leertaste ist in diesem Build unbelegt. Die
+  Konsolen-Autovervollständigung (`UE5_23_console_autocomplete.png`) ist
+  der erreichbare gleichwertige Beleg.
+- **Kein Klick auf absolute Koordinaten und kein Kontextmenü-Taste** im
+  Inspector-Werkzeugsatz; alles, was das braucht, ist entworfen
+  unerreichbar.
 
 Icons: die Screenshots zeigen Menü-Icons zu klein für Vektor-Extraktion.
 Nach ADR-0001 ist Icon-Treue Art-Arbeit im Theme — das Toolkit liefert
@@ -149,7 +196,7 @@ Die geteilten Konventionen, die den Spiegel exakt machen:
 - **Manuelles Bilinear auf der GPU**: der Shader filtert den Atlas per
   `textureLoad` in exakt der Operationsreihenfolge des CPU-Kerns —
   Hardware-Filtergewichte sind festkomma und würden um LSBs divergieren.
-- **Linearer Float-Akkumulation**: die GPU rendert in RGBA16F
+- **Lineare Float-Akkumulation**: die GPU rendert in RGBA16F
   (premultipliziertes `ONE, ONE_MINUS_SRC_ALPHA` == die CPU-Blend-
   Formel) und quantisiert erst nach dem Readback auf 8 Bit — wie die
   CPU-Referenz.
