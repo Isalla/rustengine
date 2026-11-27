@@ -92,6 +92,11 @@ mit ehrlichem Haken-Stand. ✅ fertig und testabgedeckt · 🟡 teilweise gebaut
       `re-editor::panels` über `EditorContext::call`; Fenster-Overlay via
       `render_with_ui` + `--ui-png`-CPU-Beweis; datengetrieben nach
       ADR-0001; das `ue5`-Preset (P2) folgt später
+- [x] Docking-Interaktion im default-Layout (Splitter greifen und
+      Panels umskalieren, Tabs greifen und mit Rand-/Mittelzonen
+      umlagern — `dock_splitters`/`dock_set_ratio`/`dock_take`/
+      `dock_put` in `re-render::ui`, `drop_zones` + Drag-Geist in
+      `re-editor::panels`; OS-eigene Schwebefenster zurückgestellt)
 - [ ] Mehr Dateiformate (Breite statt Einzel-Tool-Migration):
       registrgesteuerte Importierer/Exportierer — FBX (Meshes &
       Animationen), OBJ-Legat und USD (Szenen-Austausch) zusätzlich zum

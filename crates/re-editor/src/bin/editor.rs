@@ -25,7 +25,10 @@ use re_core::material::Material;
 use re_core::mesh::Mesh;
 use re_editor::{activate_tab, EditorCamera, EditorContext, LayoutManifest, PanelState, Preset};
 use re_render::ui::widgets::{Ui, UiInput, UiState};
-use re_render::ui::{dock_layout, DockNode, DrawList, FontAtlas, Rect, Theme};
+use re_render::ui::{
+    dock_layout, dock_put, dock_set_ratio, dock_splitters, dock_take, DockEdge, DockNode, DrawList,
+    FontAtlas, Rect, Theme,
+};
 use re_render::{DrawBatch, GfxBackend};
 use re_world::{
     CellHandoff, CellKey, Clipmap, ClipmapConfig, GpuUpload, HandoffConfig, Priority, StreamConfig,
@@ -219,12 +222,63 @@ impl EditorUi {
             dock_layout(&self.dock, dock, self.theme.metrics.tab_h, self.theme.metrics.splitter);
 
         let mut ui = Ui::new(area, &self.theme, &self.atlas, None, &mut self.state, input);
+        // Splitter ZUERST: der Druck gehört dem Greifband, nicht den
+        // Panels; das Verhältnis kommt direkt aus Zeiger→Track (absolut
+        // — kein Drift über Frames).
+        for hit in dock_splitters(&self.dock, dock, self.theme.metrics.tab_h, self.theme.metrics.splitter) {
+            let mut id = String::from("split");
+            for step in &hit.path {
+                id.push('-');
+                id.push_str(&step.to_string());
+            }
+            let d = ui.drag(&id, hit.grab, 0.0);
+            if d.claimed {
+                if let Some(pt) = ui.pointer() {
+                    let ratio = if hit.vertical {
+                        (pt[1] - hit.track.y) / hit.track.h.max(1.0)
+                    } else {
+                        (pt[0] - hit.track.x) / hit.track.w.max(1.0)
+                    };
+                    dock_set_ratio(&mut self.dock, &hit.path, ratio);
+                }
+            }
+        }
         // Panels zuerst, Chrome darüber, Popup zuletzt (Painter-Order).
+        self.panels.drag_ended = false;
         for pl in &placements {
             if pl.panel == "viewport" {
                 self.viewport = pl.rect;
             }
             re_editor::panels::draw_panel(&mut ui, pl, &self.theme, &self.atlas, input, &self.ctx, &mut self.panels);
+        }
+        // Umlager-Drag: Zonen-Rückmeldung übers Dock, Apply im Loslass-Frame.
+        if let Some(dragging) = self.panels.drag_panel.clone() {
+            if self.panels.drag_ended {
+                if let Some((target, edge)) = self.panels.drop.clone() {
+                    let mut t = self.dock.clone();
+                    if dock_take(&mut t, &dragging) && dock_put(&mut t, &dragging, &target, edge) {
+                        self.dock = t;
+                        let kante = match edge {
+                            DockEdge::Center => "als tab",
+                            DockEdge::Left => "links",
+                            DockEdge::Right => "rechts",
+                            DockEdge::Top => "oben",
+                            DockEdge::Bottom => "unten",
+                        };
+                        self.panels.log(format!("umgelagert: {dragging} → {target} {kante}"));
+                    }
+                }
+                self.panels.drag_panel = None;
+                self.panels.drop = None;
+            } else if let Some(pt) = input.pointer {
+                let zones = re_editor::panels::drop_zones(&placements, &dragging);
+                let hit = re_editor::panels::drop_target_at(&zones, pt);
+                self.panels.drop = hit.clone().map(|(_, t, e)| (t, e));
+                re_editor::panels::draw_drop_zones(&mut ui, &zones, hit.map(|(r, _, _)| r), &self.theme);
+                let key = format!("panel.{dragging}");
+                let label = self.theme.label(&key).to_string();
+                re_editor::panels::draw_drag_ghost(&mut ui, &self.theme, &self.atlas, &label, pt);
+            }
         }
         re_editor::panels::draw_menu_bar(&mut ui, menu_bar, &self.manifest.menu_bar, &self.theme, &self.atlas, &mut self.panels);
         re_editor::panels::draw_toolbar(&mut ui, toolbar, &self.manifest.toolbar, &self.theme, &self.atlas, &self.ctx, &mut self.panels);

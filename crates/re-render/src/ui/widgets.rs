@@ -32,6 +32,17 @@ pub fn snap(r: Rect) -> Rect {
     Rect::new(x, y, (right - x).max(0.0), (bottom - y).max(0.0))
 }
 
+/// Ergebnis eines Mausgriffs (`Ui::drag`).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct DragInfo {
+    /// Diese ID hält die Maus (vom Druck- bis zum Loslass-Frame).
+    pub claimed: bool,
+    /// Seit dem Druck mindestens `min_px` Weg zurückgelegt.
+    pub moved: bool,
+    /// Feuert genau einmal im Loslass-Frame.
+    pub ended: bool,
+}
+
 /// Eingabe-Lage eines Frames. Der Editor mappt Plattform-Events
 /// (`re-platform`) hierher; die Widgets kennen keine Plattform.
 #[derive(Clone, Debug, Default)]
@@ -57,6 +68,8 @@ pub struct UiState {
     focus: Option<u64>,
     scroll: BTreeMap<u64, f32>,
     open: BTreeMap<u64, bool>,
+    /// Druckpunkt des laufenden Zieh-Vorgangs (für Weg-Strecke).
+    drag_origin: Option<[f32; 2]>,
 }
 
 impl UiState {
@@ -146,6 +159,7 @@ impl<'a> Ui<'a> {
     pub fn end(&mut self) {
         if self.input.released {
             self.state.active = None;
+            self.state.drag_origin = None;
         }
     }
 
@@ -176,10 +190,12 @@ impl<'a> Ui<'a> {
 
     /// Treffer-Test eines Frames: (überstrichen, geklickt). Klick =
     /// Loslassen über dem Rechteck, während es die aktive Taste hält.
+    /// Wer die Taste schon hält (laufender Zieh-Vorgang), lässt sich
+    /// nicht bestehlen — Ansprüche prüfen deshalb `active.is_none()`.
     fn interact(&mut self, id: &str, r: Rect) -> (bool, bool) {
         let hid = hash_id(id);
         let under = self.input.pointer.is_some_and(|p| r.contains(p[0], p[1]));
-        if under && self.input.pressed {
+        if under && self.input.pressed && self.state.active.is_none() && self.state.focus.is_none() {
             self.state.active = Some(hid);
         }
         let clicked = self.input.released && self.state.active == Some(hid) && under;
@@ -189,6 +205,46 @@ impl<'a> Ui<'a> {
 
     fn is_active(&self, id: &str) -> bool {
         self.state.active == Some(hash_id(id))
+    }
+
+    // ── Ziehen ───────────────────────────────────────────────────────
+
+    /// Zeigerposition dieses Frames (Fenster-Pixel; `None` = außerhalb).
+    pub fn pointer(&self) -> Option<[f32; 2]> {
+        self.input.pointer
+    }
+
+    /// Hält diese ID gerade die Maus (laufender Klick- oder Zieh-Vorgang)?
+    pub fn is_held(&self, id: &str) -> bool {
+        self.state.active == Some(hash_id(id))
+    }
+
+    /// Mausgriff: Druck in `grab` beansprucht die Maus bis zum Loslassen.
+    /// `moved` meldet zurückgelegte Wege ab `min_px` (Manhattan-Distanz)
+    /// — dasselbe Rechteck kann so Klick-Ziel UND Zieh-Griff sein.
+    /// `ended` feuert genau einmal im Loslass-Frame (Zeiger egal wo);
+    /// `ui.end()` gibt die Taste danach frei.
+    pub fn drag(&mut self, id: &str, grab: Rect, min_px: f32) -> DragInfo {
+        let hid = hash_id(id);
+        let p = self.input.pointer;
+        if self.state.active == Some(hid) {
+            let dist = self
+                .state
+                .drag_origin
+                .and_then(|o| p.map(|c| (c[0] - o[0]).abs() + (c[1] - o[1]).abs()))
+                .unwrap_or(0.0);
+            DragInfo { claimed: true, moved: dist >= min_px.max(0.0), ended: self.input.released }
+        } else {
+            let under = p.is_some_and(|c| grab.contains(c[0], c[1]));
+            let claim = under && self.input.pressed && self.state.active.is_none() && self.state.focus.is_none();
+            if claim {
+                self.state.active = Some(hid);
+                self.state.drag_origin = p;
+                DragInfo { claimed: true, moved: min_px <= 0.0, ended: self.input.released }
+            } else {
+                DragInfo::default()
+            }
+        }
     }
 
     // ── Text ─────────────────────────────────────────────────────────
@@ -305,10 +361,12 @@ impl<'a> Ui<'a> {
         let th = self.theme;
         let step = th.metrics.pad * 2.0;
         let x0 = r.x + depth as f32 * step;
-        let (hovered, clicked) = self.interact(id, Rect::new(x0, r.y, (r.right() - x0).max(0.0), r.h));
+        // Dreieck ZUERST beanspruchen — sitz der Zeiger drauf, darf die
+        // Zeile den Druck nicht mehr wegschnappen (interact claimt nur,
+        // solange niemand die Taste hält).
         let mut toggled = false;
-        let mut tx = x0 + th.metrics.pad;
         let mut arrow: Option<(Rect, bool, bool)> = None;
+        let mut row_x = x0;
         if has_children {
             let a = Rect::new(x0, r.y, step, r.h);
             let (ah, ac) = self.interact(&format!("{id}/pfeil"), a);
@@ -317,6 +375,11 @@ impl<'a> Ui<'a> {
                 self.toggle(id, true);
             }
             arrow = Some((a, ah, self.is_open(id, true)));
+            row_x = a.right();
+        }
+        let (hovered, clicked) = self.interact(id, Rect::new(row_x, r.y, (r.right() - row_x).max(0.0), r.h));
+        let mut tx = x0 + th.metrics.pad;
+        if let Some((a, _, _)) = arrow {
             tx = a.right();
         }
         // Fläche zuerst, dann Dreieck, dann Text — sonst übermalt die
@@ -396,6 +459,28 @@ impl<'a> Ui<'a> {
         }
         self.text_centered(r, text, if active { th.colors.text } else { th.colors.text_dim }, true, active);
         clicked
+    }
+
+    /// Dock-Tab als Klick-ZIEL **und** Zieh-Griff: gibt
+    /// (geklickt, drag) zurück. Klick = Loslassen ohne vorherige Weg-
+    /// strecke ab `min_px` → Tab aktivieren. Weiterer Weg → Umlager-
+    /// Drag; dann bleibt `clicked` false und der Aufrufer hält die
+    /// Drag-Info in den Händen.
+    pub fn tab_drag(&mut self, id: &str, r: Rect, text: &str, active: bool, min_px: f32) -> (bool, DragInfo) {
+        let r = snap(r);
+        let d = self.drag(id, r, min_px);
+        let under = self.input.pointer.is_some_and(|p| r.contains(p[0], p[1]));
+        let clicked = d.claimed && d.ended && !d.moved && under;
+        let th = self.theme;
+        self.draw.rect(r, if active { th.colors.panel } else { th.colors.background });
+        if under && !d.moved && !active {
+            self.draw.rect(r, th.colors.hover);
+        }
+        if active {
+            self.draw.rect(Rect::new(r.x, r.bottom() - 2.0, r.w, 2.0), th.colors.accent);
+        }
+        self.text_centered(r, text, if active { th.colors.text } else { th.colors.text_dim }, true, active);
+        (clicked, d)
     }
 
     /// Checkbox mit Text; `true` beim Umschalten. Das Häkchen ist ein
@@ -544,6 +629,76 @@ mod tests {
             let i = inp(Some([150.0, 100.0]), false, true);
             let mut ui = Ui::new(area(), &t, &a, None, &mut st, &i);
             assert!(!ui.button("ok", r, "OK"), "Release außerhalb bricht ab");
+            ui.end();
+        }
+    }
+
+    #[test]
+    fn tab_drag_klick_ohne_weg_aktiviert_mit_weg_dragt() {
+        let a = atlas();
+        let t = Theme::default();
+        let mut st = UiState::default();
+        let r = Rect::new(0.0, 0.0, 90.0, 24.0);
+        // Klick: Druck und Release ohne Wegstrecke → aktivieren, kein Drag.
+        {
+            let i = inp(Some([10.0, 10.0]), true, false);
+            let mut ui = Ui::new(area(), &t, &a, None, &mut st, &i);
+            let (clicked, d) = ui.tab_drag("tab/x", r, "X", false, 6.0);
+            assert!(d.claimed && !d.moved && !d.ended && !clicked, "Press allein noch nicht");
+            ui.end();
+        }
+        {
+            let i = inp(Some([12.0, 11.0]), false, true);
+            let mut ui = Ui::new(area(), &t, &a, None, &mut st, &i);
+            let (clicked, d) = ui.tab_drag("tab/x", r, "X", false, 6.0);
+            assert!(d.ended && !d.moved && clicked, "Klick mit Mini-Wackeln");
+            ui.end();
+        }
+        // Drag: press, ≥ 6 px ziehen, anderswo loslassen → kein Klick.
+        {
+            let i = inp(Some([10.0, 10.0]), true, false);
+            let mut ui = Ui::new(area(), &t, &a, None, &mut st, &i);
+            ui.tab_drag("tab/y", r, "Y", false, 6.0);
+            ui.end();
+        }
+        {
+            let i = inp(Some([90.0, 60.0]), false, false);
+            let mut ui = Ui::new(area(), &t, &a, None, &mut st, &i);
+            let (clicked, d) = ui.tab_drag("tab/y", r, "Y", false, 6.0);
+            assert!(d.claimed && d.moved && !d.ended && !clicked, "Drag läuft");
+            ui.end();
+        }
+        {
+            let i = inp(Some([90.0, 60.0]), false, true);
+            let mut ui = Ui::new(area(), &t, &a, None, &mut st, &i);
+            let (clicked, d) = ui.tab_drag("tab/y", r, "Y", false, 6.0);
+            assert!(d.ended && d.moved && !clicked, "Drag endet ohne Klick");
+            ui.end();
+        }
+    }
+
+    #[test]
+    fn laufender_drag_wehrt_andere_widgets_am_klick_ab() {
+        let a = atlas();
+        let t = Theme::default();
+        let mut st = UiState::default();
+        let grab = Rect::new(0.0, 0.0, 6.0, 100.0);
+        let btn = Rect::new(100.0, 0.0, 60.0, 24.0);
+        {
+            let i = inp(Some([2.0, 50.0]), true, false);
+            let mut ui = Ui::new(area(), &t, &a, None, &mut st, &i);
+            assert!(ui.drag("split", grab, 0.0).claimed, "Splitter greift");
+            assert!(!ui.button("ok", btn, "OK"));
+            ui.end();
+        }
+        {
+            // Release über einem Button: der darf nicht durch den Drag
+            // hindurch klicken.
+            let i = inp(Some([120.0, 10.0]), false, true);
+            let mut ui = Ui::new(area(), &t, &a, None, &mut st, &i);
+            let d = ui.drag("split", grab, 0.0);
+            assert!(d.claimed && d.moved && d.ended);
+            assert!(!ui.button("ok", btn, "OK"), "Release klickt nicht durch");
             ui.end();
         }
     }

@@ -9,7 +9,7 @@
 use serde_json::{json, Value};
 
 use re_render::ui::widgets::{Ui, UiInput};
-use re_render::ui::{FontAtlas, PanelPlacement, Rect, Theme};
+use re_render::ui::{DockEdge, FontAtlas, PanelPlacement, Rect, Theme};
 
 use crate::context::EditorContext;
 use crate::layout::{Command, Menu};
@@ -38,6 +38,12 @@ pub struct PanelState {
     pub edit: Option<(u32, String, String, String)>,
     /// Popup-Rechteck des offenen Menüs (für Klick-außerhalb-Test).
     pub popup: Option<Rect>,
+    /// Läuft ein Tab-Umlager-Drag (Panel-id)?
+    pub drag_panel: Option<String>,
+    /// Der Umlager-Drag ist im aktuellen Frame losgelassen worden.
+    pub drag_ended: bool,
+    /// Aktive Drop-Zone während des Umlager-Drag (Ziel-Panel + Kante).
+    pub drop: Option<(String, DockEdge)>,
 }
 
 impl PanelState {
@@ -269,14 +275,84 @@ fn panel_frame(
         theme.colors.text,
     );
     // Tabs der Gruppe (falls dieses Panel in einer Tab-Gruppe aktiv ist).
+    // Klick aktiviert; Weg ab 6 px startet den Umlager-Drag (die App
+    // wertet `st.drag_panel`/`st.drag_ended` nach dem Panels-Durchgang aus).
     for (id, tr) in &pl.tabs {
         let label = theme.label(&format!("panel.{id}")).to_string();
         let active = id == &pl.panel;
-        if ui.tab(&format!("tab/{id}"), *tr, &label, active) {
+        let (clicked, d) = ui.tab_drag(&format!("tab/{id}"), *tr, &label, active, 6.0);
+        if clicked {
             st.tab_pick = Some(id.clone());
+        }
+        if d.claimed && d.moved && st.drag_panel.is_none() {
+            st.drag_panel = Some(id.clone());
+        }
+        if st.drag_panel.as_deref() == Some(id.as_str()) {
+            st.drag_ended = d.ended;
         }
     }
     Rect::new(r.x, r.y + th, r.w, (r.h - th).max(0.0))
+}
+
+// ── Umlager-Drag (Drop-Zonen + Geist) ────────────────────────────────
+
+/// Drop-Zonen über den übrigen Panels: erst die vier Randstreifen
+/// (dorthin splitten), dann die ganze Fläche (Center = als Tab andocken).
+/// Die Suchreihenfolge ist die Priorität — Kante schlägt Mitte.
+pub fn drop_zones(placements: &[PanelPlacement], dragging: &str) -> Vec<(Rect, String, DockEdge)> {
+    let mut out = Vec::new();
+    for pl in placements {
+        if pl.panel == dragging {
+            continue;
+        }
+        let r = pl.rect;
+        let d = (r.w.min(r.h) * 0.28).clamp(24.0, 140.0);
+        let bands = [
+            (Rect::new(r.x, r.y, d, r.h), DockEdge::Left),
+            (Rect::new(r.right() - d, r.y, d, r.h), DockEdge::Right),
+            (Rect::new(r.x, r.y, r.w, d), DockEdge::Top),
+            (Rect::new(r.x, r.bottom() - d, r.w, d), DockEdge::Bottom),
+        ];
+        for (z, e) in bands {
+            out.push((z, pl.panel.clone(), e));
+        }
+        out.push((r, pl.panel.clone(), DockEdge::Center));
+    }
+    out
+}
+
+/// Zone unter dem Zeiger (Kanten zuerst — Center wird zuletzt gesucht).
+pub fn drop_target_at(zones: &[(Rect, String, DockEdge)], p: [f32; 2]) -> Option<(Rect, String, DockEdge)> {
+    zones.iter().find(|(r, _, _)| r.contains(p[0], p[1])).cloned()
+}
+
+/// Rückmeldung während des Drags: feine Akzentkonturen über den
+/// Kantenstreifen, Leuchtfüllung fürs aktive Ziel — dieselbe Sprache
+/// wie UE5s Kompass, im eigenen Theme.
+pub fn draw_drop_zones(ui: &mut Ui, zones: &[(Rect, String, DockEdge)], active: Option<Rect>, theme: &Theme) {
+    let mut faint = theme.colors.accent;
+    faint[3] = 0.45;
+    let mut glow = theme.colors.accent;
+    glow[3] = 0.28;
+    for (r, _, e) in zones {
+        if *e != DockEdge::Center {
+            ui.draw.stroke(*r, 1.0, faint);
+        }
+    }
+    if let Some(a) = active {
+        ui.draw.rect(a, glow);
+        ui.draw.stroke(a, 2.0, theme.colors.accent);
+    }
+}
+
+/// Der Geister-Anhänger, der dem Zeiger folgt.
+pub fn draw_drag_ghost(ui: &mut Ui, theme: &Theme, atlas: &FontAtlas, label: &str, p: [f32; 2]) {
+    let line_h = atlas.measure(0, "Ag", 0.0)[1];
+    let w = atlas.measure(0, label, 0.0)[0].ceil() + theme.metrics.pad * 2.0;
+    let r = Rect::new(p[0] + 10.0, p[1] + 6.0, w, line_h + theme.metrics.pad);
+    ui.draw.rect(r, theme.colors.panel);
+    ui.draw.stroke(r, 1.0, theme.colors.accent);
+    ui.draw.text(atlas, 0, label, r.x + theme.metrics.pad, r.y + theme.metrics.pad * 0.5, line_h, theme.colors.text);
 }
 
 /// Anzeigename einer Entity: Name-Component, sonst rohe Index-Form.
@@ -631,5 +707,21 @@ mod tests {
             &Command { id: "x".into(), capability: "gibt.es.nicht".into(), args: json!({}), separator: false },
         );
         assert!(st.log.iter().any(|l| l.contains("FEHLER")));
+    }
+
+    #[test]
+    fn dropzonen_kanten_schlagen_mitte() {
+        let ps = vec![PanelPlacement {
+            panel: "viewport".into(),
+            rect: Rect::new(100.0, 0.0, 400.0, 300.0),
+            tabs: vec![],
+        }];
+        let zones = drop_zones(&ps, "console");
+        assert!(!zones.iter().any(|(_, t, _)| t == "console"), "eigenes Panel hat keine Zonen");
+        let hit = drop_target_at(&zones, [110.0, 150.0]).expect("linker Randstreifen");
+        assert_eq!(hit.2, DockEdge::Left);
+        let hit = drop_target_at(&zones, [300.0, 150.0]).expect("Flächenmitte");
+        assert_eq!(hit.2, DockEdge::Center);
+        assert!(drop_target_at(&zones, [10.0, 10.0]).is_none(), "außerhalb ist kein Ziel");
     }
 }

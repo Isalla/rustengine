@@ -261,6 +261,269 @@ fn place(node: &DockNode, area: Rect, tab_h: f32, sp: f32, out: &mut Vec<PanelPl
 
 // ── Draw-List ────────────────────────────────────────────────────────
 
+// ── Docking-Interaktion (Splitter ziehen, Tabs umlagern) ─────────────
+
+/// Splitter-Trefferzone: `path` führt vom Wurzelknoten zum Split
+/// (0 = `first`, 1 = `second`), `grab` ist das Greifband, `track` die
+/// Gesamtfläche des Splits (Zeiger → Verhältnis), `vertical` die Achse.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SplitHit {
+    pub path: Vec<usize>,
+    pub grab: Rect,
+    pub track: Rect,
+    pub vertical: bool,
+}
+
+/// Trefferzonen aller Splitter — spiegelt exakt die Geometrie von
+/// [`dock_layout`]; das Greifband ist mindestens 6 px dick (greifbar
+/// macht mehr Sinn als hübsch).
+pub fn dock_splitters(node: &DockNode, area: Rect, tab_h: f32, sp: f32) -> Vec<SplitHit> {
+    let mut out = Vec::new();
+    splitters(node, area, tab_h, sp, &mut Vec::new(), &mut out);
+    out
+}
+
+fn splitters(node: &DockNode, area: Rect, tab_h: f32, sp: f32, path: &mut Vec<usize>, out: &mut Vec<SplitHit>) {
+    if let DockNode::Split { vertical, ratio, first, second } = node {
+        let r = ratio.clamp(0.05, 0.95);
+        let (fa, sa, band) = if *vertical {
+            let h1 = (area.h * r - sp * 0.5).max(0.0);
+            let y2 = area.y + h1 + sp;
+            (
+                Rect::new(area.x, area.y, area.w, h1),
+                Rect::new(area.x, y2, area.w, (area.bottom() - y2).max(0.0)),
+                Rect::new(area.x, area.y + h1, area.w, sp),
+            )
+        } else {
+            let w1 = (area.w * r - sp * 0.5).max(0.0);
+            let x2 = area.x + w1 + sp;
+            (
+                Rect::new(area.x, area.y, w1, area.h),
+                Rect::new(x2, area.y, (area.right() - x2).max(0.0), area.h),
+                Rect::new(area.x + w1, area.y, sp, area.h),
+            )
+        };
+        let mut grab = band;
+        if *vertical && grab.h < 6.0 {
+            grab.y -= (6.0 - grab.h) * 0.5;
+            grab.h = 6.0;
+        }
+        if !*vertical && grab.w < 6.0 {
+            grab.x -= (6.0 - grab.w) * 0.5;
+            grab.w = 6.0;
+        }
+        out.push(SplitHit { path: path.clone(), grab, track: area, vertical: *vertical });
+        path.push(0);
+        splitters(first, fa, tab_h, sp, path, out);
+        path.pop();
+        path.push(1);
+        splitters(second, sa, tab_h, sp, path, out);
+        path.pop();
+    }
+}
+
+/// Setzt das Split-Verhältnis entlang `path` (klemmt auf 0.05..0.95).
+/// `false`, wenn der Pfad den Baum verlässt oder nicht an einem Split
+/// endet.
+pub fn dock_set_ratio(node: &mut DockNode, path: &[usize], ratio: f32) -> bool {
+    let mut cur = node;
+    for &step in path {
+        cur = match cur {
+            DockNode::Split { first, second, .. } => {
+                if step == 0 { &mut **first } else { &mut **second }
+            }
+            _ => return false,
+        };
+    }
+    match cur {
+        DockNode::Split { ratio: rr, .. } => {
+            *rr = ratio.clamp(0.05, 0.95);
+            true
+        }
+        _ => false,
+    }
+}
+
+/// Drop-Ziel beim Tab-Umlagern: Mitte = als Tab in die Zielgruppe,
+/// Kanten = Ziel-Teilbaum wird mit neuem Leaf an diese Kante gesplittet.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DockEdge {
+    Center,
+    Left,
+    Right,
+    Top,
+    Bottom,
+}
+
+/// Lebt das Panel irgendwo im Baum?
+pub fn dock_contains(node: &DockNode, panel: &str) -> bool {
+    match node {
+        DockNode::Leaf { panel: p } => p == panel,
+        DockNode::Tabs { panels, .. } => panels.iter().any(|p| p == panel),
+        DockNode::Split { first, second, .. } => dock_contains(first, panel) || dock_contains(second, panel),
+    }
+}
+
+/// Zahl der Panels im Baum (Tab-Gruppen zählen je Eintrag).
+pub fn dock_panel_count(node: &DockNode) -> usize {
+    match node {
+        DockNode::Leaf { .. } => 1,
+        DockNode::Tabs { panels, .. } => panels.len(),
+        DockNode::Split { first, second, .. } => dock_panel_count(first) + dock_panel_count(second),
+    }
+}
+
+/// Löist das Panel aus dem Baum: Tabs-Einträge verschwinden (eine Gruppe
+/// mit einem Rest wird Leaf, eine leere Gruppe kollabiert), ein Leaf
+/// löst sich selbst; die freie Split-Hälfte übernimmt die andere.
+/// `false`, wenn das Panel fehlt oder das letzte wäre — der Baum wird
+/// nie leer.
+pub fn dock_take(node: &mut DockNode, panel: &str) -> bool {
+    if !dock_contains(node, panel) || dock_panel_count(node) <= 1 {
+        return false;
+    }
+    match take_rec(node, panel) {
+        Cut::Miss => false,
+        Cut::Found => true,
+        Cut::Replace(None) => false, // Wurzel-Leaf — durch Zähl-Guard unerreichbar
+        Cut::Replace(Some(rep)) => {
+            *node = rep;
+            true
+        }
+    }
+}
+
+enum Cut {
+    /// Panel hier nicht gefunden.
+    Miss,
+    /// Gefunden und innerhalb dieses Knotens gelöst (keine Ersetzung nötig).
+    Found,
+    /// Dieser Knoten selbst muss ersetzt werden (None = verschwinden).
+    Replace(Option<DockNode>),
+}
+
+fn take_rec(node: &mut DockNode, panel: &str) -> Cut {
+    match node {
+        DockNode::Leaf { panel: p } if p == panel => Cut::Replace(None),
+        DockNode::Tabs { active, panels } => match panels.iter().position(|x| x == panel) {
+            None => Cut::Miss,
+            Some(i) => {
+                panels.remove(i);
+                if panels.is_empty() {
+                    Cut::Replace(None)
+                } else if panels.len() == 1 {
+                    Cut::Replace(Some(DockNode::Leaf { panel: panels.remove(0) }))
+                } else {
+                    *active = (*active).min(panels.len() - 1);
+                    Cut::Found
+                }
+            }
+        },
+        DockNode::Split { first, second, .. } => {
+            match take_rec(first, panel) {
+                Cut::Miss => {}
+                Cut::Found => return Cut::Found,
+                Cut::Replace(Some(n)) => {
+                    *first = Box::new(n);
+                    return Cut::Found;
+                }
+                // Erste Hälfte leer → zweite rückt vollständig nach.
+                Cut::Replace(None) => return Cut::Replace(Some(*second.clone())),
+            }
+            match take_rec(second, panel) {
+                Cut::Miss => Cut::Miss,
+                Cut::Found => Cut::Found,
+                Cut::Replace(Some(n)) => {
+                    *second = Box::new(n);
+                    Cut::Found
+                }
+                Cut::Replace(None) => Cut::Replace(Some(*first.clone())),
+            }
+        }
+        _ => Cut::Miss,
+    }
+}
+
+/// Dockt ein gelöistes Panel neben `target`: `Center` wirft es in die
+/// Tab-Gruppe des Ziels (ein Leaf wird zur Gruppe [Ziel, Panel]); eine
+/// Kante splittet den Ziel-Teilbaum mit neuem Leaf an dieser Kante
+/// (Verhältnis 0.5). `false`, wenn das Panel schon im Baum lebt, das
+/// Ziel fehlt oder Ziel == Panel ist.
+pub fn dock_put(node: &mut DockNode, panel: &str, target: &str, edge: DockEdge) -> bool {
+    if panel == target || dock_contains(node, panel) || !dock_contains(node, target) {
+        return false;
+    }
+    put_rec(node, panel, target, edge)
+}
+
+fn split_around(sub: DockNode, panel: &str, edge: DockEdge) -> DockNode {
+    let leaf = DockNode::Leaf { panel: panel.to_string() };
+    let (vertical, first, second) = match edge {
+        DockEdge::Left => (false, leaf, sub),
+        DockEdge::Right => (false, sub, leaf),
+        DockEdge::Top => (true, leaf, sub),
+        DockEdge::Bottom => (true, sub, leaf),
+        DockEdge::Center => unreachable!("Center hat keinen Split-Zweig"),
+    };
+    DockNode::Split { vertical, ratio: 0.5, first: Box::new(first), second: Box::new(second) }
+}
+
+impl DockNode {
+    /// Tab-Gruppe an der Wurzel dieses Knotens (sonst None).
+    fn tabs_group(&mut self) -> Option<&mut Vec<String>> {
+        match self {
+            DockNode::Tabs { panels, .. } => Some(panels),
+            _ => None,
+        }
+    }
+
+    /// Panel-ID, wenn dieser Knoten ein einzelnes Leaf ist.
+    fn leaf_panel(&self) -> Option<&str> {
+        match self {
+            DockNode::Leaf { panel } => Some(panel),
+            _ => None,
+        }
+    }
+}
+
+fn put_rec(node: &mut DockNode, panel: &str, target: &str, edge: DockEdge) -> bool {
+    // Tabs-Gruppe mit dem Ziel: Mitte → einreihen, Kante → Gruppe splitten.
+    if let Some(panels) = node.tabs_group() {
+        if let Some(at) = panels.iter().position(|p| p == target) {
+            match edge {
+                DockEdge::Center => {
+                    panels.insert(at + 1, panel.to_string());
+                    if let DockNode::Tabs { active, .. } = node {
+                        *active = at + 1;
+                    }
+                    return true;
+                }
+                e => {
+                    let sub = std::mem::replace(node, DockNode::Leaf { panel: String::new() });
+                    *node = split_around(sub, panel, e);
+                    return true;
+                }
+            }
+        }
+    }
+    // Leaf-Ziel: Mitte → Gruppe [Ziel, Panel], Kante → Leaf splitten.
+    if node.leaf_panel() == Some(target) {
+        let sub = std::mem::replace(node, DockNode::Leaf { panel: String::new() });
+        *node = match edge {
+            DockEdge::Center => DockNode::Tabs { active: 1, panels: vec![target.to_string(), panel.to_string()] },
+            e => split_around(sub, panel, e),
+        };
+        return true;
+    }
+    if let DockNode::Split { first, second, .. } = node {
+        if dock_contains(first, target) {
+            return put_rec(first, panel, target, edge);
+        }
+        return put_rec(second, panel, target, edge);
+    }
+    false
+}
+
 /// Ein UI-Eckpunkt: Position, Atlas-UV (0 für untexturierte Farbe),
 /// Farbe linear RGBA. Identisches Layout für den GPU-Pass.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -965,5 +1228,124 @@ mod tests {
             .expect("bild")
             .save(&path)
             .expect("png");
+    }
+
+    #[test]
+    fn splitter_spiegelt_die_layout_geometrie() {
+        let root = DockNode::Split {
+            vertical: false,
+            ratio: 0.25,
+            first: Box::new(DockNode::Leaf { panel: "a".into() }),
+            second: Box::new(DockNode::Leaf { panel: "b".into() }),
+        };
+        let area = Rect::new(0.0, 0.0, 1000.0, 500.0);
+        let hits = dock_splitters(&root, area, 20.0, 4.0);
+        assert_eq!(hits.len(), 1);
+        let g = &hits[0];
+        assert!(!g.vertical);
+        assert_eq!(g.track, area);
+        // Das Band sitzt in der Lücke zwischen a und b, überlappt aber
+        // kein Panel: Links von 248 und rechts von 252 muss jeweils ein
+        // Panel anfangen, dazwischen greift der Splitter.
+        assert!(g.grab.contains(249.0, 100.0) && g.grab.contains(251.0, 100.0));
+        let ps = dock_layout(&root, area, 20.0, 4.0);
+        assert_eq!(ps.len(), 2);
+        for pl in &ps {
+            assert!(!g.grab.contains(pl.rect.x + 1.0, pl.rect.y + 1.0), "Greifband über Panel");
+        }
+    }
+
+    #[test]
+    fn ratio_pfad_suche_und_klemmen() {
+        let inner = DockNode::Split {
+            vertical: true,
+            ratio: 0.5,
+            first: Box::new(DockNode::Leaf { panel: "x".into() }),
+            second: Box::new(DockNode::Leaf { panel: "y".into() }),
+        };
+        let mut root = DockNode::Split {
+            vertical: false,
+            ratio: 0.5,
+            first: Box::new(inner),
+            second: Box::new(DockNode::Leaf { panel: "z".into() }),
+        };
+        assert!(dock_set_ratio(&mut root, &[0], 1.7), "klemmt auf 0.95");
+        if let DockNode::Split { ratio: rr, .. } = &root {
+            assert!((*rr - 0.5).abs() < 1e-6, "root bleibt ruhig");
+        }
+        if let DockNode::Split { first, .. } = &root {
+            if let DockNode::Split { ratio, .. } = &**first {
+                assert!((*ratio - 0.95).abs() < 1e-6, "innerer Split geklemmt");
+            } else {
+                panic!("first ist kein Split");
+            }
+        }
+        assert!(dock_set_ratio(&mut root, &[0], 0.3), "innerer Split erneut gesetzt");
+        if let DockNode::Split { first, .. } = &root {
+            if let DockNode::Split { ratio, .. } = &**first {
+                assert!((*ratio - 0.3).abs() < 1e-6);
+            }
+        }
+        assert!(!dock_set_ratio(&mut root, &[1, 0], 0.5), "Blatt am Pfadende — abweg");
+        assert!(!dock_set_ratio(&mut root, &[0, 0], 0.5), "Blatt im Inneren — abweg");
+    }
+
+    #[test]
+    fn take_und_put_erhalten_jedes_panel() {
+        // Dock wie im default-Preset rechts: Tabs[console, assistant] | viewport
+        let mut root = DockNode::Split {
+            vertical: false,
+            ratio: 0.7,
+            first: Box::new(DockNode::Tabs {
+                active: 0,
+                panels: vec!["console".into(), "assistant".into()],
+            }),
+            second: Box::new(DockNode::Leaf { panel: "viewport".into() }),
+        };
+        assert_eq!(dock_panel_count(&root), 3);
+        // assistant → tabs[Mitte]console
+        assert!(dock_take(&mut root, "assistant"));
+        assert_eq!(dock_panel_count(&root), 2, "Rest-Tabs mit einem Kind kollabiert zu Leaf");
+        assert!(dock_put(&mut root, "assistant", "console", DockEdge::Center));
+        assert_eq!(dock_panel_count(&root), 3);
+        let ps = dock_layout(&root, Rect::new(0.0, 0.0, 1000.0, 600.0), 20.0, 4.0);
+        assert!(ps.iter().any(|p| p.panel == "assistant" && !p.tabs.is_empty()), "assistant aktiv in der Gruppe");
+        // assistant → Kante rechts vom viewport
+        assert!(dock_take(&mut root, "assistant"));
+        assert!(dock_put(&mut root, "assistant", "viewport", DockEdge::Right));
+        if let DockNode::Split { second, .. } = &root {
+            assert!(
+                matches!(&**second, DockNode::Split { vertical: false, ratio, .. } if (*ratio - 0.5).abs() < 1e-6),
+                "Rechts-Split mit 0.5"
+            );
+        } else {
+            panic!("root bleibt Split");
+        }
+        assert_eq!(dock_panel_count(&root), 3);
+        assert!(dock_contains(&root, "assistant"));
+    }
+
+    #[test]
+    fn take_schuetzt_letztes_panel_put_prueft_bindungen() {
+        let mut single = DockNode::Leaf { panel: "solo".into() };
+        assert!(!dock_take(&mut single, "solo"), "das letzte Panel bleibt");
+
+        let mut root = DockNode::Split {
+            vertical: false,
+            ratio: 0.5,
+            first: Box::new(DockNode::Leaf { panel: "a".into() }),
+            second: Box::new(DockNode::Leaf { panel: "b".into() }),
+        };
+        assert!(!dock_put(&mut root, "c", "wo.nichts.ist", DockEdge::Center), "Ziel fehlt");
+        assert!(!dock_put(&mut root, "a", "b", DockEdge::Center), "Panel sitzt schon im Baum");
+        assert!(dock_take(&mut root, "a"));
+        assert!(!dock_put(&mut root, "a", "a", DockEdge::Center), "nicht auf sich selbst");
+        assert!(dock_put(&mut root, "a", "b", DockEdge::Center));
+        if let DockNode::Tabs { active, panels } = &root {
+            assert_eq!(panels, &vec!["b".to_string(), "a".to_string()]);
+            assert_eq!(*active, 1, "frischangedocktes Tab wird aktiv");
+        } else {
+            panic!("Gruppe entstanden");
+        }
     }
 }

@@ -89,6 +89,11 @@ honest state of repair. ✅ done and test-covered · 🟡 partially built ·
       `EditorContext::call`; windowed overlay via `render_with_ui` +
       `--ui-png` CPU proof; data-driven per ADR-0001; the `ue5`
       preset (P2) follows later
+- [x] Docking interaction on the default layout (grab splitters to
+      resize panels, grab tabs to redock with edge/center drop zones —
+      `dock_splitters`/`dock_set_ratio`/`dock_take`/`dock_put` in
+      `re-render::ui`, `drop_zones` + drag ghost in `re-editor::panels`;
+      OS-level floating windows deferred)
 - [ ] More file formats (breadth over single-tool migration):
       registry-driven importers/exporters — FBX (meshes & animation),
       OBJ legacy and USD (scene interchange) on top of the existing
