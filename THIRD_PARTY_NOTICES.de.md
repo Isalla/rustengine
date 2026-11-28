@@ -29,6 +29,15 @@ unabhängige Open-Source-Dekoder abgeglichen: AssetStudio (`etc.cpp`,
 MIT), ANGLE (`loadimage_etc.cpp`, BSD-3-Clause) und SwiftShader
 (`etcdec.cxx`, Apache-2.0).
 
+## FBX-Test-Fixtures (`crates/re-io/tests/data/fbx/`)
+
+Fünf binäre `.fbx`-Beispiele aus dem Regression-Katalog von
+[ufbx](https://github.com/ufbx/ufbx) (`data/`): echte Exporte aus
+Blender, Maya und 3ds Max als Import-Testfälle. ufbx und seine Daten
+sind dual lizenziert (MIT / Unlicense); die Nutzung hier erfolgt unter
+der MIT-Variante — der Lizenztext steht im englischen Dokument und in
+`ATTRIBUTION.md` neben den Dateien.
+
 ## Inter-Schrift (`assets/fonts/inter/`)
 
 Inter von Rasmus Andersson, lizenziert unter der SIL Open Font License

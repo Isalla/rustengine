@@ -117,11 +117,14 @@ mit ehrlichem Haken-Stand. ✅ fertig und testabgedeckt · 🟡 teilweise gebaut
       das Pi-Zielformat — decodiert ebenfalls nativ (RGB8, RGB8A1,
       RGBA8, EAC R11/RG11 über eigenen CPU-Decoder); signierte
       EAC-Formate und ASTC melden klar zurück.
+      Binär-FBX ab 7.4 importiert Meshes, Materialien, Skins und
+      Animations-Takes über das reine Rust-Crate `fbxcel` (nur Import;
+      ASCII, vor-7.4 und voll komprimiertes FBX melden sauber zurück).
       Nur offene Standards;
       Inhalte aus anderen Engines kommen über deren offizielle Exporter
       (UE/Unity exportieren selbst FBX/USD/glTF).
-- [ ] Format-Nachzug: USD (ASCII-Teilmenge) und FBX (Meshes &
-      Animationen) als weitere Importierer; proprietäre Szenenformate
+- [ ] Format-Nachzug: USD (ASCII-Teilmenge) als weiterer Importierer;
+      proprietäre Szenenformate
       (`.uasset`/`.umap`, `.unity`) bleiben unsupported — als Idee
       geparkt, bis die Hersteller offene Formate veröffentlichen;
       Spiel-Code wandert ohnehin nie mit
