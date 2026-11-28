@@ -269,6 +269,106 @@ fn ktx2_etc1s_kündigt_transcoder_an() {
     assert!(t.contains("BasisLZSS") && t.contains("ETC1S"), "klare Ansage: {e}");
 }
 
+/// KTX2 mit echtem DFD-Abschnitt und Stufenindex: Index hinter dem
+/// Kopf, DFD danach, Bilddaten 4-ausgerichtet hinter dem DFD.
+fn ktx2_dfd(vk: u32, w: u32, h: u32, supercomp: u32, dfd: &[u8], levels: &[&[u8]]) -> Vec<u8> {
+    assert!(!levels.is_empty());
+    let mut b = vec![0u8; 80];
+    b[0..12].copy_from_slice(&[0xAB, 0x4B, 0x54, 0x58, 0x20, 0x32, 0x30, 0xBB, 0x0D, 0x0A, 0x1A, 0x0A]);
+    b[12..16].copy_from_slice(&vk.to_le_bytes());
+    b[16..20].copy_from_slice(&1u32.to_le_bytes());
+    b[20..24].copy_from_slice(&w.to_le_bytes());
+    b[24..28].copy_from_slice(&h.to_le_bytes());
+    b[36..40].copy_from_slice(&1u32.to_le_bytes()); // faceCount
+    b[40..44].copy_from_slice(&(levels.len() as u32).to_le_bytes()); // levelCount
+    b[44..48].copy_from_slice(&supercomp.to_le_bytes());
+    let dfd_off = 80 + levels.len() * 24;
+    b[48..52].copy_from_slice(&(dfd_off as u32).to_le_bytes());
+    b[52..56].copy_from_slice(&(dfd.len() as u32).to_le_bytes());
+    let data_off = (dfd_off + dfd.len()).next_multiple_of(4);
+    b[56..60].copy_from_slice(&(data_off as u32).to_le_bytes()); // kvdByteOffset
+    let mut off = data_off;
+    for lvl in levels {
+        b.extend_from_slice(&(off as u64).to_le_bytes()); // LevelOffset
+        b.extend_from_slice(&(lvl.len() as u64).to_le_bytes()); // ByteLength
+        b.extend_from_slice(&(lvl.len() as u64).to_le_bytes()); // UncompressedByteLength
+        off += lvl.len();
+    }
+    b.extend_from_slice(dfd);
+    b.resize(data_off, 0);
+    for lvl in levels {
+        b.extend_from_slice(lvl);
+    }
+    b
+}
+
+/// Farbdeskriptor mit Modell und Transferfunktion (linear/sRGB).
+fn dfd_farbe(model: u32, transfer: u32) -> Vec<u8> {
+    let mut d = vec![0u8; 24];
+    d[0..4].copy_from_slice(&24u32.to_le_bytes());
+    d[6..8].copy_from_slice(&2u16.to_le_bytes());
+    d[12..14].copy_from_slice(&4u16.to_le_bytes());
+    d[16..20].copy_from_slice(&0x7000u32.to_le_bytes());
+    d[20..24].copy_from_slice(&((model | (transfer << 12)) as u32).to_le_bytes());
+    d
+}
+
+/// Void-Extent-ASTC-4×4-Block in einer Farbe (UNORM16 je Kanal).
+fn uastc_block() -> Vec<u8> {
+    let mut block = [0xFFu8; 16];
+    block[0] = 0xFC;
+    block[1] = 0xFD;
+    block[8..].copy_from_slice(&[0x34, 0x12, 0x78, 0x56, 0xBC, 0x9A, 0xF0, 0xDE]);
+    block.to_vec()
+}
+
+#[test]
+fn ktx2_uastc_wird_als_astc_4x4_gelesen() {
+    // vkFormat 0 + DFD-Modell 166: die Blöcke laufen durch den ASTC-Pfad.
+    let d = tex::decode_bytes(&ktx2_dfd(0, 4, 4, 0, &dfd_farbe(166, 2), &[&uastc_block()]))
+        .unwrap();
+    assert_eq!((d.width, d.height), (4, 4));
+    assert!(d.rgba.chunks_exact(4).all(|p| p == [0x12, 0x56, 0x9A, 0xDE]));
+}
+
+#[test]
+fn ktx2_uastc_kette_mit_stufen() {
+    // Zwei Stufen (4×4 und 2×2): je ein Block pro Stufe, Kette wird
+    // wie üblich nach `mips` einsortiert.
+    let block = uastc_block();
+    let d = tex::decode_bytes(&ktx2_dfd(
+        0,
+        4,
+        4,
+        0,
+        &dfd_farbe(166, 1),
+        &[&block[..], &block[..]],
+    ))
+    .unwrap();
+    assert_eq!(d.mips.len(), 1);
+    assert_eq!((d.mips[0].width, d.mips[0].height), (2, 2));
+    assert_eq!(d.mips[0].rgba.len(), 2 * 2 * 4);
+}
+
+#[test]
+fn ktx2_etc1s_im_dfd_meldet_transcoder() {
+    // Modell 163 ohne BasisLZ-Vorspann: trotzdem ETC1S — klare Ansage.
+    let e = tex::decode_bytes(&ktx2_dfd(0, 4, 4, 0, &dfd_farbe(163, 1), &[&[0u8; 16]])).unwrap_err();
+    assert!(e.to_string().contains("ETC1S"), "klare Ansage: {e}");
+}
+
+#[test]
+fn ktx2_uastc_hdr_meldet_klar() {
+    let e = tex::decode_bytes(&ktx2_dfd(0, 4, 4, 0, &dfd_farbe(167, 1), &[&[0u8; 16]])).unwrap_err();
+    assert!(e.to_string().contains("HDR"), "klare Ansage: {e}");
+}
+
+#[test]
+fn ktx2_vk0_ohne_dfd_meldet_klar() {
+    let e = tex::decode_bytes(&ktx2(0, 4, 4, 0, &[0u8; 16])).unwrap_err();
+    assert!(e.to_string().contains("DFD"), "klare Ansage: {e}");
+}
+
 #[test]
 fn ktx2_etc2_rgb8_block() {
     // Nullblock: Einzel-Modus (Bit 33 = 0), Farbe 0, Index 00 → +2.

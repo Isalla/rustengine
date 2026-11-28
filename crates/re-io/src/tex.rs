@@ -16,8 +16,10 @@
 //! (Payloads sind bitgleich) sowie ETC2/EAC und ASTC (alle 14
 //! 2D-Blockgrößen, UNORM und SRGB; eigene Decoder-Module mit
 //! gegen zwei Referenzen fuzzvalidierter Bitgenauigkeit).
-//! Basis-Superkompression (ETC1S/UASTC) meldet einen klaren Fehler —
-//! sie steht mit im Textur-Nachzug der Roadmap.
+//! Basis-UASTC ist mitgelesen — seine Blöcke sind zulässige ASTC-4×4-
+//! Blöcke und laufen über denselben Decoder (Profil aus dem DFD).
+//! ETC1S (BasisLZ) und Zstd-superkomprimizierte Daten melden einen
+//! klaren Fehler — sie stehen weiter im Textur-Nachzug der Roadmap.
 //!
 //! **OpenEXR** dekodiert das `exr`-Crate (reines Rust). EXR ist
 //! linearer Fließkomma; für den RGBA8-Pfad wird klemmt und
@@ -541,9 +543,15 @@ mod ktx2 {
     //! zeilenmajor von oben, wie DDS), die blockkomprimierten
     //! BC1–BC5/BC7-Daten über denselben Block-Decoder wie bei DDS
     //! (KTX2-Payloads sind bitidentisch zu DDS) sowie ETC2/EAC und
-    //! ASTC in allen 14 2D-Blockgrößen (UNORM/SRGB). Superkompression
-    //! (BasisLZSS/ETC1S, Zstd/UASTC) meldet klaren Fehler, bis der
-    //! Transcoder einzieht. Cubemap, 3D und Arrays folgen später.
+    //! ASTC in allen 14 2D-Blockgrößen (UNORM/SRGB). Bei
+    //! `vkFormat = UNDEFINED` entscheidet der Data Format Descriptor:
+    //! Basis-UASTC (Farbmodell 166) ist zulässiger ASTC-4×4-Stoff und
+    //! läuft über denselben Decoder — die Transferfunktion aus dem DFD
+    //! liefert das UNORM-/SRGB-Profil; die Kanal-IDs braucht der
+    //! CPU-Pfad nicht, dekodierte RGBA-Texel sind bereits die Wahrheit.
+    //! ETC1S (163), UASTC-HDR (167) und Zstd-Superkompression melden
+    //! klare Fehler, bis Transcoder und Entpacker einziehen. Cubemap,
+    //! 3D und Arrays folgen später.
 
     use super::{Decoded, Mip};
     use anyhow::{Result, bail};
@@ -557,6 +565,38 @@ mod ktx2 {
 
     fn u64le(b: &[u8], off: usize) -> u64 {
         u64::from_le_bytes(b[off..off + 8].try_into().unwrap())
+    }
+
+    fn u16le(b: &[u8], off: usize) -> u16 {
+        u16::from_le_bytes(b[off..off + 2].try_into().unwrap())
+    }
+
+    /// Bei `vkFormat = UNDEFINED` entscheidet der DFD (KHR Data Format):
+    /// sein erster Farbdeskriptor trägt im ersten Sample Modell
+    /// (Bits 0–7) und Transferfunktion (Bits 12–15 des hohen Wortes).
+    /// UASTC (166) wird als ASTC 4×4 gelesen — UASTC-Blöcke sind
+    /// zulässige ASTC-Blöcke; alles andere meldet klar zurück.
+    fn basis_uastc_profile(b: &[u8]) -> Result<bool> {
+        let off = u32le(b, 48) as usize;
+        let len = u32le(b, 52) as usize;
+        let end = off
+            .checked_add(len)
+            .filter(|e| *e <= b.len())
+            .filter(|_| len >= 24)
+            .ok_or_else(|| anyhow::anyhow!("ktx2: vkFormat undefined ohne brauchbaren DFD"))?;
+        let d = &b[off..end];
+        if u16le(d, 4) != 0 || u16le(d, 8) != 0 {
+            bail!("ktx2: DFD-Fremdanbieter oder kein Farbdeskriptor — nicht UASTC");
+        }
+        let hi = u32le(d, 20);
+        let model = hi & 0xFF;
+        let transfer = (hi >> 12) & 0xF;
+        match model {
+            163 => bail!("ktx2: ETC1S (DFD-Modell 163) — Transcoder steht noch aus"),
+            167 => bail!("ktx2: UASTC HDR (DFD-Modell 167) — HDR-Texturen folgen später"),
+            166 => Ok(transfer == 2), // 2 = SRGB, 1 = linear
+            m => bail!("ktx2: transcodierbares DFD-Modell {m} steht noch aus"),
+        }
     }
 
     /// Datenversatz der Grundstufe: aus dem Level-Index (eintrag 0
@@ -594,7 +634,16 @@ mod ktx2 {
     }
 
     /// Eine Stufe nach RGBA; Dekoder teilen sich den Block-Pfad mit DDS.
-    fn decode_level(vk: u32, b: &[u8], off: usize, width: u32, height: u32) -> Result<Vec<u8>> {
+    /// `basis` trägt bei `vkFormat = UNDEFINED` das UASTC-Profil
+    /// (sRGB-Flag aus dem DFD) — sonst `None`.
+    fn decode_level(
+        vk: u32,
+        basis: Option<bool>,
+        b: &[u8],
+        off: usize,
+        width: u32,
+        height: u32,
+    ) -> Result<Vec<u8>> {
         let pixels = (width as usize) * (height as usize);
         let mut rgba = vec![0u8; pixels * 4];
         let short = |what: &str| anyhow::anyhow!("ktx2: {what}");
@@ -639,7 +688,14 @@ mod ktx2 {
                 crate::astc::decode_blocks(fmt, b, off, width, height, &mut rgba)
                     .map_err(|e| e.context("ktx2"))?;
             }
-            0 => bail!("ktx2: vkFormat undefined ohne Basis-Superkompression"),
+            0 => {
+                // vkFormat UNDEFINED: nur UASTC kennt der Container —
+                // zulässige ASTC-4×4-Blöcke, Profil kam aus dem DFD.
+                let srgb = basis.ok_or_else(|| short("vkFormat undefined ohne UASTC-DFD"))?;
+                let fmt = crate::astc::AstcFormat { block_w: 4, block_h: 4, hdr: false, srgb };
+                crate::astc::decode_blocks(fmt, b, off, width, height, &mut rgba)
+                    .map_err(|e| e.context("ktx2"))?;
+            }
             other => bail!("ktx2: vkFormat {other} wird nicht decodiert"),
         }
         Ok(rgba)
@@ -669,6 +725,9 @@ mod ktx2 {
             2 => bail!("ktx2: Zstd-Superkompression — Entpacker steht noch aus"),
             other => bail!("ktx2: Superkompression {other} unbekannt"),
         }
+        // `vkFormat = UNDEFINED` kündigt ein Basis-Format an: der DFD
+        // entscheidet, nur UASTC (ohne Zstd) ist schon machbar.
+        let basis = if vk == 0 { Some(basis_uastc_profile(b)?) } else { None };
 
         // Stufen: mit levelCount >= 1 steht der Index (24 Byte je
         // Eintrag) direkt hinter dem Kopf; bei levelCount 0 fehlt er —
@@ -692,7 +751,7 @@ mod ktx2 {
             if i > 0 && off + vk_bytes(vk, lw, lh) > b.len() {
                 break; // abgeschnittene Kette: Rest weglassen, Stufe 0 gilt
             }
-            let px = decode_level(vk, b, off, lw, lh)?;
+            let px = decode_level(vk, basis, b, off, lw, lh)?;
             match &base {
                 None => base = Some(px),
                 Some(_) => mips.push(Mip { width: lw, height: lh, rgba: px }),
@@ -702,6 +761,58 @@ mod ktx2 {
         }
         let rgba = base.ok_or_else(|| anyhow::anyhow!("ktx2: Datendatei zu kurz"))?;
         Ok(Decoded { width, height, rgba, mips })
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        /// Kopf-Attrap ohne Level-Index: DFD direkt bei 80.
+        fn head(dfd: &[u8]) -> Vec<u8> {
+            let mut b = vec![0u8; 80];
+            b[12..16].copy_from_slice(&0u32.to_le_bytes()); // vkFormat undefined
+            b[48..52].copy_from_slice(&80u32.to_le_bytes());
+            b[52..56].copy_from_slice(&(dfd.len() as u32).to_le_bytes());
+            b.extend_from_slice(dfd);
+            b
+        }
+
+        /// Ein Farbdeskriptor (8 Byte Blockkopf + 8 Byte Sample).
+        fn dfd(model: u32, transfer: u32) -> Vec<u8> {
+            let mut d = vec![0u8; 24];
+            d[0..4].copy_from_slice(&24u32.to_le_bytes()); // totalSize
+            d[6..8].copy_from_slice(&2u16.to_le_bytes()); // descriptorVersion
+            d[12..14].copy_from_slice(&4u16.to_le_bytes()); // blockDescSize (Wörter)
+            d[16..20].copy_from_slice(&0x7000u32.to_le_bytes()); // Sample-Position/Länge
+            d[20..24].copy_from_slice(&((model | (transfer << 12)) as u32).to_le_bytes());
+            d
+        }
+
+        #[test]
+        fn uastc_profil_aus_dem_dfd() {
+            assert!(!basis_uastc_profile(&head(&dfd(166, 1))).unwrap()); // linear
+            assert!(basis_uastc_profile(&head(&dfd(166, 2))).unwrap()); // sRGB
+        }
+
+        #[test]
+        fn fremde_modelle_melden_klar() {
+            let e = format!("{}", basis_uastc_profile(&head(&dfd(163, 1))).unwrap_err());
+            assert!(e.contains("ETC1S"), "klare Ansage: {e}");
+            let e = format!("{}", basis_uastc_profile(&head(&dfd(167, 1))).unwrap_err());
+            assert!(e.contains("HDR"), "klare Ansage: {e}");
+            let e = format!("{}", basis_uastc_profile(&head(&dfd(165, 1))).unwrap_err());
+            assert!(e.contains("Modell 165"), "klare Ansage: {e}");
+        }
+
+        #[test]
+        fn fehlender_oder_fremder_dfd_meldet_klar() {
+            let e = format!("{}", basis_uastc_profile(&head(&[])).unwrap_err());
+            assert!(e.contains("DFD"), "klare Ansage: {e}");
+            let mut d = dfd(166, 1);
+            d[4..6].copy_from_slice(&7u16.to_le_bytes()); // Fremdvendor
+            let e = format!("{}", basis_uastc_profile(&head(&d)).unwrap_err());
+            assert!(e.contains("Fremdanbieter"), "klare Ansage: {e}");
+        }
     }
 }
 

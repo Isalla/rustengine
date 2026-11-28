@@ -10,8 +10,9 @@
 //! (`.png`, `.jpg`, `.tga`, `.bmp`, `.qoi`, `.dds`, `.ktx2`, `.exr`)
 //! decode through [`tex`]; DDS and KTX2 are decoded natively
 //! (uncompressed plus BC1–BC5, BC7, ETC2/EAC and ASTC in all fourteen
-//! 2D block sizes; Basis-supercompressed KTX2 arrives with the
-//! transcoder), OpenEXR through the pure-Rust `exr` crate.
+//! 2D block sizes; Basis UASTC rides the ASTC 4×4 decoder, ETC1S and
+//! Zstd-supercompressed payloads answer back until the transcoder
+//! arrives), OpenEXR through the pure-Rust `exr` crate.
 
 pub mod astc;
 mod bc7;

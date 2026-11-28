@@ -132,7 +132,10 @@ honest state of repair. ✅ done and test-covered · 🟡 partially built ·
       (`.uasset`/`.umap`, `.unity`) stay unsupported — parked as an
       idea until the vendors publish open formats; game code never
       migrates anyway
-- [ ] Texture backlog: Basis transcoding inside KTX2 (ETC1S, UASTC) —
+- [ ] Texture backlog: Basis transcoding inside KTX2 — UASTC is done
+      (its blocks are legal ASTC 4×4 and ride the own decoder, the DFD
+      picks the UNORM/SRGB profile); ETC1S (BasisLZ codebooks) and
+      Zstd-supercompressed payloads still await an unpacker —
       decode-side breadth for the streaming pipeline
 
 ## M5 — Render pipeline V2 ⬜

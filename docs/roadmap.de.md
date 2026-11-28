@@ -136,8 +136,12 @@ mit ehrlichem Haken-Stand. ✅ fertig und testabgedeckt · 🟡 teilweise gebaut
       (`.uasset`/`.umap`, `.unity`) bleiben unsupported — als Idee
       geparkt, bis die Hersteller offene Formate veröffentlichen;
       Spiel-Code wandert ohnehin nie mit
-- [ ] Textur-Nachzug: Basis-Transcoding in KTX2 (ETC1S, UASTC) — Breite auf
-      der Decoder-Seite für den Streaming-Pfad
+- [ ] Textur-Nachzug: Basis-Transcoding in KTX2 — UASTC ist fertig
+      (seine Blöcke sind zulässiges ASTC 4×4 und laufen über den
+      eigenen Decoder, das DFD liefert das UNORM-/SRGB-Profil);
+      ETC1S (BasisLZ-Codebücher) und Zstd-superkomprimizierte Payloads
+      warten noch auf einen Entpacker — Breite auf der Decoder-Seite
+      für den Streaming-Pfad
 
 ## M5 — Render-Pipeline V2 ⬜
 
