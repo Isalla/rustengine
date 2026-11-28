@@ -7,6 +7,21 @@ Lizenzpflichten, die sie mitbringen. Normale Crate-Abhängigkeiten sind
 durch `Cargo.lock` und die Upstream-Lizenztexte abgedeckt; diese Datei
 nennt alles, was im Quellbaum selbst liegt.
 
+## ASTC-Decoder (`crates/re-io/src/astc.rs`)
+
+Eigene Rust-Implementierung nach dem Anhang „Adaptive Scalable Texture
+Compression“ der Khronos Data Format Specification. Es wurde kein Code
+übernommen; die abgeleiteten Tabellen (Blockmodus-Zeilen,
+ISE-Bereichs-/Stufentabellen, Trit- und Quint-Dekodierung) sind aus den
+Algorithmen der Spezifikation materialisiert und tabellenweise gegen die
+Referenzdekompresser verifiziert. Die Blockausgabe ist fuzzvalidiert
+(4000 Blöcke × 14 2D-Blockgrößen × LDR-/HDR-Pfad) und bitgenau gegen
+Binomials `basisu_astc_helpers` (Basis Universal, Apache-2.0, selbst
+gegen ARM astcenc gefuzzt), mit dem Android-dEQP-`astc_dec`
+(Apache-2.0) als Sekundärcheck; Abweichungen gegen diesen beschränken
+sich auf die dokumentierten Ablehnungs-Besonderheiten. Code der
+Referenzen ist nicht enthalten.
+
 ## BC7-Decoder (`crates/re-io/src/bc7.rs`)
 
 Bitlayout und Decode-Logik folgen der Referenzimplementierung

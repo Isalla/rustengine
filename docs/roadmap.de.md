@@ -116,7 +116,11 @@ mit ehrlichem Haken-Stand. ✅ fertig und testabgedeckt · 🟡 teilweise gebaut
       Fließkomma wird geklemmt und sRGB-kodiert als RGBA8). ETC2/EAC —
       das Pi-Zielformat — decodiert ebenfalls nativ (RGB8, RGB8A1,
       RGBA8, EAC R11/RG11 über eigenen CPU-Decoder); signierte
-      EAC-Formate und ASTC melden klar zurück.
+      EAC-Formate melden klar zurück. ASTC decodiert ebenfalls nativ:
+      alle 14 2D-Blockgrößen, UNORM und SRGB, inklusive Void-Extent und
+      Dual-Plane; die Blockausgabe ist fuzzvalidiert bitgenau gegen zwei
+      unabhängige Referenzdekompresser (Details in
+      `THIRD_PARTY_NOTICES.de.md`).
       Binär-FBX ab 7.4 importiert Meshes, Materialien, Skins und
       Animations-Takes über das reine Rust-Crate `fbxcel` (nur Import;
       ASCII, vor-7.4 und voll komprimiertes FBX melden sauber zurück).
@@ -128,8 +132,7 @@ mit ehrlichem Haken-Stand. ✅ fertig und testabgedeckt · 🟡 teilweise gebaut
       (`.uasset`/`.umap`, `.unity`) bleiben unsupported — als Idee
       geparkt, bis die Hersteller offene Formate veröffentlichen;
       Spiel-Code wandert ohnehin nie mit
-- [ ] Textur-Nachzug: Basis-Transcoding in KTX2 (ETC1S, UASTC) und
-      ASTC-Decodierung — Breite auf
+- [ ] Textur-Nachzug: Basis-Transcoding in KTX2 (ETC1S, UASTC) — Breite auf
       der Decoder-Seite für den Streaming-Pfad
 
 ## M5 — Render-Pipeline V2 ⬜

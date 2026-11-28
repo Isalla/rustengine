@@ -5,6 +5,21 @@ license obligations they carry. Ordinary crate dependencies are covered
 by `Cargo.lock` and shipped license texts upstream; this file lists
 things that live inside the source tree.
 
+## ASTC decoder (`crates/re-io/src/astc.rs`)
+
+Original Rust implementation written against the Khronos Data Format
+Specification annex "Adaptive Scalable Texture Compression". No code was
+copied; the derived tables (block-mode row table, ISE range/level
+tables, trit and quint decode tables) were materialized from the
+specification's algorithms and verified table-by-table against the
+reference decoders. The per-block output was fuzz-validated (4000
+blocks × 14 2D block sizes × LDR/HDR paths) bit-exact against Binomial's
+`basisu_astc_helpers` decoder (Basis Universal, Apache-2.0, itself
+fuzz-tested against ARM astcenc), with the Android dEQP `astc_dec`
+decoder (Apache-2.0) as a secondary check; divergences against the
+latter are confined to its documented rejection-scope quirks. Neither
+reference's code is included.
+
 ## BC7 decoder (`crates/re-io/src/bc7.rs`)
 
 Bit-layout and decode logic follow the reference implementation

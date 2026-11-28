@@ -12,10 +12,12 @@
 //! liefern — offen, bis es Float-Texturen gibt.
 //!
 //! **KTX2** liest `re-io` ebenfalls selbst: unkomprimierte Payloads
-//! (R8/RGBA/BGRA) und die BC-Formate über denselben Block-Decoder wie
-//! DDS (Payloads sind bitgleich). Basis-Superkompression (ETC1S/UASTC)
-//! und ETC2 melden klare Fehler — sie stehen mit im Textur-Nachzug
-//! der Roadmap.
+//! (R8/RGBA/BGRA), die BC-Formate über denselben Block-Decoder wie DDS
+//! (Payloads sind bitgleich) sowie ETC2/EAC und ASTC (alle 14
+//! 2D-Blockgrößen, UNORM und SRGB; eigene Decoder-Module mit
+//! gegen zwei Referenzen fuzzvalidierter Bitgenauigkeit).
+//! Basis-Superkompression (ETC1S/UASTC) meldet einen klaren Fehler —
+//! sie steht mit im Textur-Nachzug der Roadmap.
 //!
 //! **OpenEXR** dekodiert das `exr`-Crate (reines Rust). EXR ist
 //! linearer Fließkomma; für den RGBA8-Pfad wird klemmt und
@@ -536,12 +538,12 @@ mod ktx2 {
     //! DDS); abgeschnittene Ketten reduzieren sich, statt zu scheitern.
     //!
     //! Verstanden werden unkomprimizierte Payloads (R8, RGBA, BGRA —
-    //! zeilenmajor von oben, wie DDS) und die blockkomprimierten
-    //! BC1–BC5/BC7-Daten über denselben Block-Decoder wie bei DDS:
-    //! KTX2-Payloads sind bitidentisch zu DDS. Superkompression
+    //! zeilenmajor von oben, wie DDS), die blockkomprimierten
+    //! BC1–BC5/BC7-Daten über denselben Block-Decoder wie bei DDS
+    //! (KTX2-Payloads sind bitidentisch zu DDS) sowie ETC2/EAC und
+    //! ASTC in allen 14 2D-Blockgrößen (UNORM/SRGB). Superkompression
     //! (BasisLZSS/ETC1S, Zstd/UASTC) meldet klaren Fehler, bis der
-    //! Transcoder einzieht; ETC2/EAC bleibt als Pi-Zielformat
-    //! angekündigt. Cubemap, 3D und Arrays folgen später.
+    //! Transcoder einzieht. Cubemap, 3D und Arrays folgen später.
 
     use super::{Decoded, Mip};
     use anyhow::{Result, bail};
@@ -581,6 +583,11 @@ mod ktx2 {
             // BC4/ATI1 und ETC2 RGB8/RGB8A1/EAC R11: 8 Byte je Block.
             131..=134 | 139 | 147..=150 | 153 | 154 => {
                 (w as usize).div_ceil(4) * (h as usize).div_ceil(4) * 8
+            }
+            // ASTC 2D (VK 157–184): 16 Byte je Block im echten Footprint.
+            157..=184 => {
+                let (bx, by) = crate::astc::block_dims(vk).unwrap_or((4, 4));
+                (w as usize).div_ceil(bx) * (h as usize).div_ceil(by) * 16
             }
             _ => (w as usize).div_ceil(4) * (h as usize).div_ceil(4) * 16,
         }
@@ -627,7 +634,11 @@ mod ktx2 {
                     .map_err(|e| e.context("ktx2"))?;
             }
             154 | 156 => bail!("ktx2: signierte EAC-Formate (SNORM) passen nicht in RGBA8"),
-            157 | 158 => bail!("ktx2: ASTC folgt als Nachzug"),
+            157..=184 => {
+                let fmt = crate::astc::astc_format(vk).ok_or_else(|| short("ASTC-vkFormat unplausibel"))?;
+                crate::astc::decode_blocks(fmt, b, off, width, height, &mut rgba)
+                    .map_err(|e| e.context("ktx2"))?;
+            }
             0 => bail!("ktx2: vkFormat undefined ohne Basis-Superkompression"),
             other => bail!("ktx2: vkFormat {other} wird nicht decodiert"),
         }

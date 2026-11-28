@@ -7,10 +7,11 @@
 //! import only) via the pure-Rust `fbxcel` crate. Texture files
 //! (`.png`, `.jpg`, `.tga`, `.bmp`, `.qoi`, `.dds`, `.ktx2`, `.exr`)
 //! decode through [`tex`]; DDS and KTX2 are decoded natively
-//! (uncompressed plus BC1–BC5 and BC7; Basis-supercompressed KTX2
-//! arrives with the transcoder), OpenEXR through the pure-Rust `exr`
-//! crate.
+//! (uncompressed plus BC1–BC5, BC7, ETC2/EAC and ASTC in all fourteen
+//! 2D block sizes; Basis-supercompressed KTX2 arrives with the
+//! transcoder), OpenEXR through the pure-Rust `exr` crate.
 
+pub mod astc;
 mod bc7;
 mod etc2;
 mod export;

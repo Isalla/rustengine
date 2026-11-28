@@ -287,9 +287,39 @@ fn ktx2_etc2_rgba8_alpha_wort_zuerst() {
 }
 
 #[test]
-fn ktx2_astc_und_eac_snorm_melden_klar() {
-    let e = tex::decode_bytes(&ktx2(157, 4, 4, 0, &[0u8; 16])).unwrap_err();
-    assert!(e.to_string().contains("ASTC"), "klare Ansage: {e}");
+fn ktx2_astc_void_extent_4x4() {
+    // Void-Extent 2D (LDR): bits[8:0] = 0b111111100, Bits 10/11 = 1,
+    // Extents „alle Einsen“, Farbe als UNORM16 je Kanal.
+    let mut block = [0xFFu8; 16];
+    block[0] = 0xFC;
+    block[1] = 0xFD;
+    block[8..].copy_from_slice(&[0x34, 0x12, 0x78, 0x56, 0xBC, 0x9A, 0xF0, 0xDE]);
+    let d = tex::decode_bytes(&ktx2(157, 4, 4, 0, &block)).unwrap(); // 4x4 UNORM
+    assert!(d.rgba.chunks_exact(4).all(|p| p == [0x12, 0x56, 0x9A, 0xDE]));
+}
+
+#[test]
+fn ktx2_astc_illegaler_block_wird_magenta() {
+    // bits[0:4] == 0 ist reserviert: Norm-Fehlerfarbe, kein Ladeabbruch.
+    let d = tex::decode_bytes(&ktx2(158, 4, 4, 0, &[0u8; 16])).unwrap();
+    assert!(d.rgba.chunks_exact(4).all(|p| p == [255, 0, 255, 255]));
+}
+
+#[test]
+fn ktx2_astc_12x12_footprint() {
+    // vkFormat 184 = 12x12 SRGB: 5×5 Bild passt in genau einen Block.
+    let mut block = [0xFFu8; 16];
+    block[0] = 0xFC;
+    block[1] = 0xFD;
+    block[8..].copy_from_slice(&[0x00, 0x80, 0x00, 0x40, 0x00, 0x20, 0x00, 0x10]);
+    let d = tex::decode_bytes(&ktx2(184, 5, 5, 0, &block)).unwrap();
+    // UNORM16 0x8000/0x4000/0x2000/0x1000 → RGBA8 = k >> 8.
+    assert_eq!(d.rgba.len(), 25 * 4);
+    assert!(d.rgba.chunks_exact(4).all(|p| p == [0x80, 0x40, 0x20, 0x10]));
+}
+
+#[test]
+fn ktx2_eac_snorm_meldet_klar() {
     let e = tex::decode_bytes(&ktx2(154, 4, 4, 0, &[0u8; 8])).unwrap_err();
     assert!(e.to_string().contains("SNORM"), "klare Ansage: {e}");
 }

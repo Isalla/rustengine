@@ -112,7 +112,11 @@ honest state of repair. ✅ done and test-covered · 🟡 partially built ·
       decodes through the pure-Rust `exr` crate (linear float
       clamped and sRGB-encoded into RGBA8). ETC2/EAC — the Pi target
       format — decodes natively too (RGB8, RGB8A1, RGBA8, EAC R11/RG11
-      via own CPU decoder); signed EAC and ASTC answer back cleanly.
+      via own CPU decoder); signed EAC answers back cleanly. ASTC decodes
+      natively as well: all fourteen 2D block sizes, UNORM and SRGB,
+      void-extent and dual-plane included; per-block output is
+      fuzz-validated bit-exact against two independent reference decoders
+      (details in `THIRD_PARTY_NOTICES.md`).
       Binary FBX ≥ 7.4 imports meshes, materials, skins and animation
       takes through the pure-Rust `fbxcel` crate (import only; ASCII,
       pre-7.4 and fully compressed FBX answer back cleanly).
@@ -124,8 +128,7 @@ honest state of repair. ✅ done and test-covered · 🟡 partially built ·
       (`.uasset`/`.umap`, `.unity`) stay unsupported — parked as an
       idea until the vendors publish open formats; game code never
       migrates anyway
-- [ ] Texture backlog: Basis transcoding inside KTX2 (ETC1S, UASTC)
-      and ASTC decode —
+- [ ] Texture backlog: Basis transcoding inside KTX2 (ETC1S, UASTC) —
       decode-side breadth for the streaming pipeline
 
 ## M5 — Render pipeline V2 ⬜
