@@ -4,8 +4,9 @@
 //! glTF 2.0 (`.gltf`), binary GLB (`.glb`) with meshes, materials,
 //! skins (skeletons) and animations, and Wavefront OBJ (`.obj`) with
 //! MTL materials on the legacy path. Texture files (`.png`, `.jpg`,
-//! `.tga`, `.bmp`, `.qoi`, `.dds`) decode through [`tex`]; DDS is
-//! decoded natively (uncompressed plus BC1–BC5 and BC7).
+//! `.tga`, `.bmp`, `.qoi`, `.dds`, `.ktx2`) decode through [`tex`];
+//! DDS and KTX2 are decoded natively (uncompressed plus BC1–BC5 and
+//! BC7; Basis-supercompressed KTX2 arrives with the transcoder).
 
 mod bc7;
 mod export;

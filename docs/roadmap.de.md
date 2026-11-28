@@ -108,7 +108,9 @@ mit ehrlichem Haken-Stand. ✅ fertig und testabgedeckt · 🟡 teilweise gebaut
       zentraler Textur-Lader (`re_io::tex`) für PNG/JPEG/TGA/BMP/QOI
       plus natives DDS — unkomprimiert nach Bitmasken, BC1–BC5
       (DXT1/3/5/ATI1/ATI2) und BC7 (eigener Decoder, bitgenau nach
-      Spezifikation), inklusive DX10-Kopf. Nur offene Standards;
+      Spezifikation), inklusive DX10-Kopf. KTX2-Container liest es
+      ebenfalls nativ (unkomprimiert und BC-Payloads, bitgleich zu
+      DDS). Nur offene Standards;
       Inhalte aus anderen Engines kommen über deren offizielle Exporter
       (UE/Unity exportieren selbst FBX/USD/glTF).
 - [ ] Format-Nachzug: USD (ASCII-Teilmenge) und FBX (Meshes &
@@ -116,8 +118,9 @@ mit ehrlichem Haken-Stand. ✅ fertig und testabgedeckt · 🟡 teilweise gebaut
       (`.uasset`/`.umap`, `.unity`) bleiben unsupported — als Idee
       geparkt, bis die Hersteller offene Formate veröffentlichen;
       Spiel-Code wandert ohnehin nie mit
-- [ ] Textur-Nachzug: KTX2 (Basis Universal: ETC1S/UASTC), OpenEXR
-      und vollständige Mip-Ketten (heute nur Stufe 0) — Breite auf
+- [ ] Textur-Nachzug: Basis-Transcoding in KTX2 (ETC1S, UASTC),
+      ETC2/EAC-CPU-Decoder (Pi-Zielformat), OpenEXR und vollständige
+      Mip-Ketten (heute nur Stufe 0) — Breite auf
       der Decoder-Seite für den Streaming-Pfad
 
 ## M5 — Render-Pipeline V2 ⬜

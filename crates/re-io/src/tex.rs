@@ -11,6 +11,12 @@
 //! BC6H meldet einen klaren Fehler, statt stillschweigend Müll zu
 //! liefern — offen, bis es Float-Texturen gibt.
 //!
+//! **KTX2** liest `re-io` ebenfalls selbst: unkomprimierte Payloads
+//! (R8/RGBA/BGRA) und die BC-Formate über denselben Block-Decoder wie
+//! DDS (Payloads sind bitgleich). Basis-Superkompression (ETC1S/UASTC)
+//! und ETC2 melden klare Fehler — zusammen mit EXR und Mip-Ketten
+//! stehen sie im Textur-Nachzug der Roadmap.
+//!
 //! Mip-Ketten: gelesen wird Stufe 0 — der Streaming-Pfad baut seine
 //! eigenen Stufen; DDS-Dateien mit Mips dürfen nicht scheitern.
 
@@ -40,6 +46,9 @@ pub fn decode_bytes(bytes: &[u8]) -> anyhow::Result<Decoded> {
     if bytes.starts_with(b"DDS ") {
         return dds::decode(bytes);
     }
+    if bytes.starts_with(&ktx2::MAGIC) {
+        return ktx2::decode(bytes);
+    }
     let reader = image::ImageReader::new(std::io::Cursor::new(bytes))
         .with_guessed_format()?;
     if reader.format().is_none() {
@@ -52,7 +61,8 @@ pub fn decode_bytes(bytes: &[u8]) -> anyhow::Result<Decoded> {
 }
 
 /// Endungen, die [`decode`] versteht (für Auswahl-Dialoge/Doku).
-pub const TEXTURE_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "tga", "bmp", "qoi", "dds"];
+pub const TEXTURE_EXTENSIONS: &[&str] =
+    &["png", "jpg", "jpeg", "tga", "bmp", "qoi", "dds", "ktx2"];
 
 // ── DDS ──────────────────────────────────────────────────────────────
 
@@ -165,8 +175,9 @@ mod dds {
         v
     }
 
-    /// BC1/BC2/BC3/BC4/BC5 blockweise nach RGBA8 expandieren.
-    fn decode_blocks(
+    /// BC1/BC2/BC3/BC4/BC5/BC7 blockweise nach RGBA8 expandieren —
+    /// shared von DDS und KTX2 (beide Payloads sind bitgleich).
+    pub(super) fn decode_blocks(
         b: &[u8],
         off: usize,
         width: u32,
@@ -397,6 +408,119 @@ mod dds {
             }
         } else {
             bail!("dds: unbekanntes pixelFormat (flags {pf_flags:#x})");
+        }
+        Ok(Decoded { width, height, rgba })
+    }
+}
+
+// ── KTX 2.0 ──────────────────────────────────────────────────────────
+
+mod ktx2 {
+    //! KTX2-Container: gelesen wird Stufe 0 direkt nach RGBA8.
+    //!
+    //! Verstanden werden unkomprimizierte Payloads (R8, RGBA, BGRA —
+    //! zeilenmajor von oben, wie DDS) und die blockkomprimierten
+    //! BC1–BC5/BC7-Daten über denselben Block-Decoder wie bei DDS:
+    //! KTX2-Payloads sind bitidentisch zu DDS. Superkompression
+    //! (BasisLZSS/ETC1S, Zstd/UASTC) meldet klaren Fehler, bis der
+    //! Transcoder einzieht; ETC2/EAC bleibt als Pi-Zielformat
+    //! angekündigt. Cubemap, 3D und Arrays folgen später.
+
+    use super::Decoded;
+    use anyhow::{Result, bail};
+
+    pub const MAGIC: [u8; 12] =
+        [0xAB, 0x4B, 0x54, 0x58, 0x20, 0x32, 0x30, 0xBB, 0x0D, 0x0A, 0x1A, 0x0A];
+
+    fn u32le(b: &[u8], off: usize) -> u32 {
+        u32::from_le_bytes(b[off..off + 4].try_into().unwrap())
+    }
+
+    fn u64le(b: &[u8], off: usize) -> u64 {
+        u64::from_le_bytes(b[off..off + 8].try_into().unwrap())
+    }
+
+    /// Datenversatz der Grundstufe: aus dem Level-Index (eintrag 0
+    /// sitzt direkt hinter dem 80-Byte-Kopf) oder — bei levelCount 0,
+    /// wo kein Index geschrieben wird — hinter den Metadaten-Abschnitten.
+    fn level0_offset(b: &[u8], levels: u32) -> Result<usize> {
+        if levels >= 1 {
+            if b.len() < 104 {
+                bail!("ktx2: Level-Index abgeschnitten");
+            }
+            return Ok(u64le(b, 80) as usize);
+        }
+        let dfd_end = u32le(b, 48) as usize + u32le(b, 52) as usize;
+        let kvd_end = u32le(b, 56) as usize + u32le(b, 60) as usize;
+        let sgd_end = u64le(b, 64) as usize + u64le(b, 72) as usize;
+        Ok(dfd_end.max(kvd_end).max(sgd_end).next_multiple_of(4))
+    }
+
+    pub fn decode(b: &[u8]) -> Result<Decoded> {
+        if b.len() < 80 || !b.starts_with(&MAGIC) {
+            bail!("ktx2: Kopf fehlt");
+        }
+        let vk = u32le(b, 12);
+        let width = u32le(b, 20);
+        let height = u32le(b, 24);
+        let depth = u32le(b, 28);
+        let layers = u32le(b, 32);
+        let faces = u32le(b, 36);
+        let levels = u32le(b, 40);
+        let supercomp = u32le(b, 44);
+        if width == 0 || height == 0 || width > 16384 || height > 16384 {
+            bail!("ktx2: Maße {width}x{height} unplausibel");
+        }
+        if depth != 0 || faces != 1 || layers > 1 {
+            bail!("ktx2: nur 2D-Einzeltexturen (3D/Cube/Array kommen später)");
+        }
+        match supercomp {
+            0 => {}
+            1 => bail!("ktx2: BasisLZSS (ETC1S) — Transcoder steht noch aus"),
+            2 => bail!("ktx2: Zstd-Superkompression (UASTC) — Entpacker steht noch aus"),
+            other => bail!("ktx2: Superkompression {other} unbekannt"),
+        }
+        let off = level0_offset(b, levels)?;
+
+        let pixels = (width as usize) * (height as usize);
+        let mut rgba = vec![0u8; pixels * 4];
+        let short = |what: &str| anyhow::anyhow!("ktx2: {what}");
+        match vk {
+            37 | 43 => {
+                let src = b.get(off..off + pixels * 4).ok_or_else(|| short("RGBA-Daten fehlen"))?;
+                rgba.copy_from_slice(src);
+            }
+            44 | 50 => {
+                let src = b.get(off..off + pixels * 4).ok_or_else(|| short("BGRA-Daten fehlen"))?;
+                for (d, s) in rgba.chunks_exact_mut(4).zip(src.chunks_exact(4)) {
+                    d.copy_from_slice(&[s[2], s[1], s[0], s[3]]);
+                }
+            }
+            9 => {
+                let src = b.get(off..off + pixels).ok_or_else(|| short("R8-Daten fehlen"))?;
+                for (d, s) in rgba.chunks_exact_mut(4).zip(src.iter()) {
+                    d.copy_from_slice(&[*s, *s, *s, 255]);
+                }
+            }
+            131..=139 | 141 | 145 | 146 => {
+                let four = match vk {
+                    131..=134 => *b"DXT1",
+                    135 | 136 => *b"DXT3",
+                    137 | 138 => *b"DXT5",
+                    139 => *b"ATI1",
+                    141 => *b"ATI2",
+                    _ => *b"BC7\0",
+                };
+                super::dds::decode_blocks(b, off, width, height, &four, &mut rgba)
+                    .map_err(|e| e.context("ktx2"))?;
+            }
+            140 | 142 => bail!("ktx2: signierte Blockformate (BC4/BC5 SNORM) passen nicht in RGBA8"),
+            143 | 144 => bail!("ktx2: BC6H gehört in die Offline-Pipeline (HDR-Folge)"),
+            147..=158 => {
+                bail!("ktx2: ETC2/EAC ist das Pi-Zielformat — CPU-Decoder folgt als Nachzug")
+            }
+            0 => bail!("ktx2: vkFormat undefined ohne Basis-Superkompression"),
+            other => bail!("ktx2: vkFormat {other} wird nicht decodiert"),
         }
         Ok(Decoded { width, height, rgba })
     }

@@ -1002,11 +1002,15 @@ impl Inner {
             return Some(v.clone());
         }
         // Dekodierung zentral in re-io (PNG/JPEG/TGA/BMP/QOI + natives
-        // DDS). Der Größenwächter bleibt: erst Kopf prüfen, dann
-        // decodieren — die Pi-RAM ist kniffelig. Für DDS misst re-io
-        // selbst (16k-Grenze), `image` kennt das Format nicht.
-        let is_dds = path.rsplit('.').next().is_some_and(|e| e.eq_ignore_ascii_case("dds"));
-        if !is_dds {
+        // DDS und KTX2). Der Größenwächter bleibt: erst Kopf prüfen,
+        // dann decodieren — die Pi-RAM ist kniffelig. Für DDS und KTX2
+        // misst re-io selbst (16k-Grenze), `image` kennt diese
+        // Formate nicht.
+        let native = path
+            .rsplit('.')
+            .next()
+            .is_some_and(|e| e.eq_ignore_ascii_case("dds") || e.eq_ignore_ascii_case("ktx2"));
+        if !native {
             let (dw, dh) = image::ImageReader::open(path)
                 .ok()?
                 .with_guessed_format()

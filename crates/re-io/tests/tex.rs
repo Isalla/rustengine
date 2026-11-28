@@ -199,3 +199,85 @@ fn fremde_bytes_sind_kein_texturformat() {
     let e = tex::decode_bytes(b"GARBAGE-GARBAGE-GARBAGE").unwrap_err();
     assert!(e.to_string().contains("unbekanntes"), "sauberer Fehler: {e}");
 }
+
+// ── KTX 2.0 ──────────────────────────────────────────────────────────
+
+/// Minimaler KTX2-Speicher: 80-Byte-Kopf, ein Level-Index-Eintrag,
+/// Daten ab Versatz 104 (dfd/kvd leer).
+fn ktx2(vk: u32, w: u32, h: u32, supercomp: u32, data: &[u8]) -> Vec<u8> {
+    let mut b = vec![0u8; 80];
+    b[0..12].copy_from_slice(&[0xAB, 0x4B, 0x54, 0x58, 0x20, 0x32, 0x30, 0xBB, 0x0D, 0x0A, 0x1A, 0x0A]);
+    b[12..16].copy_from_slice(&vk.to_le_bytes());
+    b[16..20].copy_from_slice(&1u32.to_le_bytes());
+    b[20..24].copy_from_slice(&w.to_le_bytes());
+    b[24..28].copy_from_slice(&h.to_le_bytes());
+    b[36..40].copy_from_slice(&1u32.to_le_bytes()); // faceCount
+    b[40..44].copy_from_slice(&1u32.to_le_bytes()); // levelCount
+    b[44..48].copy_from_slice(&supercomp.to_le_bytes());
+    b[48..52].copy_from_slice(&104u32.to_le_bytes()); // dfdByteOffset
+    b[56..60].copy_from_slice(&104u32.to_le_bytes()); // kvdByteOffset
+    b.extend_from_slice(&104u64.to_le_bytes()); // level 0: offset
+    b.extend_from_slice(&(data.len() as u64).to_le_bytes()); // byteLength
+    b.extend_from_slice(&(data.len() as u64).to_le_bytes()); // unkomprimiert
+    b.extend_from_slice(data);
+    b
+}
+
+#[test]
+fn ktx2_rgba8_unkomprimiert() {
+    let data: Vec<u8> = (0..16u8).collect();
+    let d = tex::decode_bytes(&ktx2(37, 2, 2, 0, &data)).unwrap();
+    assert_eq!((d.width, d.height), (2, 2));
+    assert_eq!(d.rgba, data);
+}
+
+#[test]
+fn ktx2_bgra_wird_umgedreht() {
+    let d = tex::decode_bytes(&ktx2(44, 1, 1, 0, &[10, 20, 30, 255])).unwrap();
+    assert_eq!(&d.rgba[..], &[30, 20, 10, 255]);
+}
+
+#[test]
+fn ktx2_bc1_block() {
+    // Endepunkte weiß/schwarz, alle Selektoren 0 → 4×4 deckend weiß.
+    let d = tex::decode_bytes(&ktx2(133, 4, 4, 0, &[0xFF, 0xFF, 0, 0, 0, 0, 0, 0])).unwrap();
+    assert!(d.rgba.chunks_exact(4).all(|p| p == [255, 255, 255, 255]));
+}
+
+#[test]
+fn ktx2_bc7_srgb_block() {
+    // vkFormat 146 = BC7_SRGB — Bytes identisch zu UNORM, derselbe
+    // Modus-6-Block wie im DDS-Test.
+    let block = [
+        0xC0u8, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x5B, 0x55, 0x55, 0x55, 0x55, 0x55,
+        0x55, 0x55,
+    ];
+    let d = tex::decode_bytes(&ktx2(146, 4, 4, 0, &block)).unwrap();
+    assert!(d.rgba.chunks_exact(4).all(|p| p == [255, 255, 255, 255]));
+}
+
+#[test]
+fn ktx2_r8_wird_grau() {
+    let d = tex::decode_bytes(&ktx2(9, 2, 1, 0, &[8, 200])).unwrap();
+    assert_eq!(d.rgba, vec![8, 8, 8, 255, 200, 200, 200, 255]);
+}
+
+#[test]
+fn ktx2_etc1s_kündigt_transcoder_an() {
+    let e = tex::decode_bytes(&ktx2(0, 4, 4, 1, &[0u8; 8])).unwrap_err();
+    let t = e.to_string();
+    assert!(t.contains("BasisLZSS") && t.contains("ETC1S"), "klare Ansage: {e}");
+}
+
+#[test]
+fn ktx2_etc2_bleibt_pi_ziel() {
+    let e = tex::decode_bytes(&ktx2(147, 4, 4, 0, &[0u8; 8])).unwrap_err();
+    assert!(e.to_string().contains("ETC2"), "klare Ansage: {e}");
+}
+
+#[test]
+fn ktx2_kopf_muss_volständig_sein() {
+    let mut b = ktx2(37, 1, 1, 0, &[0u8; 4]);
+    b.truncate(60);
+    assert!(tex::decode_bytes(&b).is_err());
+}

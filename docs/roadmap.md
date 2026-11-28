@@ -105,6 +105,8 @@ honest state of repair. ✅ done and test-covered · 🟡 partially built ·
       loading (`re_io::tex`) for PNG/JPEG/TGA/BMP/QOI plus native DDS
       — uncompressed bit-mask formats, BC1–BC5 (DXT1/3/5/ATI1/ATI2)
       and BC7 (own decoder, bit-exact per spec), DX10 header included.
+      KTX2 containers decode natively too (uncompressed and BC
+      payloads, bit-identical to DDS).
       Open standards only; content from other
       engines arrives through their official exporters (UE/Unity export
       FBX/USD/glTF themselves).
@@ -113,8 +115,9 @@ honest state of repair. ✅ done and test-covered · 🟡 partially built ·
       (`.uasset`/`.umap`, `.unity`) stay unsupported — parked as an
       idea until the vendors publish open formats; game code never
       migrates anyway
-- [ ] Texture backlog: KTX2 (Basis Universal: ETC1S/UASTC), OpenEXR
-      and full mip chains (level 0 only today) — decode-side breadth
+- [ ] Texture backlog: Basis transcoding inside KTX2 (ETC1S, UASTC),
+      ETC2/EAC CPU decode (Pi target format), OpenEXR and full mip
+      chains (level 0 only today) — decode-side breadth
       for the streaming pipeline
 
 ## M5 — Render pipeline V2 ⬜
