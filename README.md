@@ -134,7 +134,8 @@ small; `cargo test --workspace` must stay green.
 MIT — Copyright (c) 2026 Waldemar Friesen. Anyone redistributing this
 project or parts of it (including modified versions) must carry the
 copyright notice and the license text unchanged; see
-[LICENSE](LICENSE).
+[LICENSE](LICENSE). Ported third-party code and bundled assets carry
+their own notices; see [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES.md).
 
 A friendly request — entirely voluntary and not a condition: if a game
 or tool is built with this engine, I would be glad about a credit

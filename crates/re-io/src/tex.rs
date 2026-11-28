@@ -6,9 +6,10 @@
 //! kennt das Format nicht und DDS ist der Hauslieferant für
 //! GPU-Texturpakete: unkomprimiert (32-Bit nach Bitmaske — RGBA/BGRA/
 //! A2B10G10R10, 16-Bit 5-6-5 und 1-5-5-5, 8-Bit Luminanz/Alpha) sowie
-//! die blockkomprimierten BC1–BC5 (DXT1/3/4/5), inklusive DX10-Header.
-//! BC6/BC7 melden einen klaren Fehler, statt stillschweigend Müll zu
-//! liefern.
+//! die blockkomprimierten BC1–BC5 (DXT1/3/4/5) sowie BC7 (`bc7`-Modul,
+//! das Desktop-Format für RGBA-Qualität), inklusive DX10-Header.
+//! BC6H meldet einen klaren Fehler, statt stillschweigend Müll zu
+//! liefern — offen, bis es Float-Texturen gibt.
 //!
 //! Mip-Ketten: gelesen wird Stufe 0 — der Streaming-Pfad baut seine
 //! eigenen Stufen; DDS-Dateien mit Mips dürfen nicht scheitern.
@@ -179,8 +180,9 @@ mod dds {
             b"DXT4" | b"DXT5" | b"BC3 " => 3,
             b"ATI1" | b"BC4 " => 4,
             b"ATI2" | b"BC5 " => 5,
+            b"BC7\0" => 7,
             other => bail!(
-                "dds: VierCC '{}' wird nicht decodiert (BC6/BC7 gehören in die Offline-Pipeline)",
+                "dds: VierCC '{}' wird nicht decodiert (BC6H gehört in die Offline-Pipeline)",
                 String::from_utf8_lossy(other)
             ),
         };
@@ -194,6 +196,20 @@ mod dds {
         for by in 0..bh {
             for bx in 0..bw {
                 let base = off + (by * bw + bx) * block_bytes;
+                if kind == 7 {
+                    // BC7 liefert RGBA in einem Durchgang (bc7-Modul).
+                    let mut px = [[0u8; 4]; 16];
+                    crate::bc7::decode_block(&b[base..base + 16], &mut px);
+                    for (i, p) in px.iter().enumerate() {
+                        let gx = bx * 4 + i % 4;
+                        let gy = by * 4 + i / 4;
+                        if gx >= width as usize || gy >= height as usize {
+                            continue;
+                        }
+                        rgba[(gy * width as usize + gx) * 4..][..4].copy_from_slice(p);
+                    }
+                    continue;
+                }
                 let mut color = [[0u8; 3]; 16];
                 let mut alpha = [255u8; 16];
                 match kind {
@@ -277,15 +293,17 @@ mod dds {
             }
             let dxgi = u32le(b, 128)?;
             // DXGI_FORMAT-Werte: 71–73 BC1, 74–76 BC2, 77–79 BC3,
-            // 80–82 BC4, 83–85 BC5 (jeweils TYPELESS/UNORM/SRGB).
+            // 80–82 BC4, 83–85 BC5, 98–100 BC7 (jeweils
+            // TYPELESS/UNORM[SRGB]-Dreiergruppen).
             let four_like = match dxgi {
                 71..=73 => *b"DXT1",
                 74..=76 => *b"DXT3",
                 77..=79 => *b"DXT5",
                 80..=82 => *b"ATI1",
                 83..=85 => *b"ATI2",
+                98..=100 => *b"BC7\0",
                 other => bail!(
-                    "dds: DX10-Format {other} wird nicht decodiert (BC6/BC7 gehören in die Offline-Pipeline)"
+                    "dds: DX10-Format {other} wird nicht decodiert (BC6H gehört in die Offline-Pipeline)"
                 ),
             };
             data_off = 148;

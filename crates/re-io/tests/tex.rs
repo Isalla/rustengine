@@ -140,11 +140,46 @@ fn dx10_kopf_mit_bc3_format() {
 }
 
 #[test]
-fn bc7_meldet_fehler_statt_müll() {
+fn bc7_legacy_viercc_wird_decodiert() {
+    // Modus 6, alle Endpunkte 255 (+P-Bit) → Block gleich weiß.
     let mut b = dds_header(4, 4, PF_FOURCC, *b"BC7\0", 0, [0; 4]);
+    b.extend_from_slice(&[
+        0xC0, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x5B, 0x55, 0x55, 0x55, 0x55, 0x55,
+        0x55, 0x55,
+    ]);
+    let d = tex::decode_bytes(&b).unwrap();
+    assert_eq!((d.width, d.height), (4, 4));
+    assert!(
+        d.rgba.chunks_exact(4).all(|p| p == [255, 255, 255, 255]),
+        "{:?}",
+        &d.rgba[..32]
+    );
+}
+
+#[test]
+fn bc7_ueber_dx10_kopf() {
+    // DXGI 100 = BC7_UNORM; derselbe Block wie im Legacy-Test.
+    let mut b = dds_header(4, 4, PF_FOURCC, *b"DX10", 0, [0; 4]);
+    let mut dx10 = vec![0u8; 20];
+    dx10[0..4].copy_from_slice(&100u32.to_le_bytes());
+    b.extend_from_slice(&dx10);
+    b.extend_from_slice(&[
+        0xC0, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x5B, 0x55, 0x55, 0x55, 0x55, 0x55,
+        0x55, 0x55,
+    ]);
+    let d = tex::decode_bytes(&b).unwrap();
+    assert!(d.rgba.chunks_exact(4).all(|p| p == [255, 255, 255, 255]));
+}
+
+#[test]
+fn bc6h_meldet_fehler_statt_müll() {
+    let mut b = dds_header(4, 4, PF_FOURCC, *b"DX10", 0, [0; 4]);
+    let mut dx10 = vec![0u8; 20];
+    dx10[0..4].copy_from_slice(&97u32.to_le_bytes()); // BC6H_UNORM
+    b.extend_from_slice(&dx10);
     b.extend_from_slice(&[0u8; 16]);
     let e = tex::decode_bytes(&b).unwrap_err();
-    assert!(e.to_string().contains("BC7"), "klare Ansage: {e}");
+    assert!(e.to_string().contains("BC6"), "klare Ansage: {e}");
 }
 
 #[test]

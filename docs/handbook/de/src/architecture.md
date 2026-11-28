@@ -5,7 +5,7 @@
 | Crate | Aufgabe |
 |---|---|
 | `re-core` | Datenmodell: Szenengraph, Meshes, Materialien, Animationen, Terrain, Tilesets |
-| `re-io` | Szenen-Datei-I/O: glTF 2.0/GLB, OBJ+MTL; Textur-Laden inkl. natives DDS (BC1–BC5) |
+| `re-io` | Szenen-Datei-I/O: glTF 2.0/GLB, OBJ+MTL; Textur-Laden inkl. natives DDS (BC1–BC5, BC7) |
 | `re-ecs` | Entity-Component-System: Welt, Sparse-Set-Speicher, Schedule |
 | `re-world` | World-Partition: Raster, Clipmap, Tiers, Streaming, HLOD, Telemetrie, Ego-Übergabe |
 | `re-render` | Backend-neutrale Render-Schicht: `GfxBackend`-Trait, Kamera, Draw-Batches |

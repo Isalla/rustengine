@@ -103,8 +103,9 @@ honest state of repair. ✅ done and test-covered · 🟡 partially built ·
       OBJ (+MTL) reader/writer on top of the existing glTF path,
       extension dispatch in `re_io::import/export`; unified texture
       loading (`re_io::tex`) for PNG/JPEG/TGA/BMP/QOI plus native DDS
-      — uncompressed bit-mask formats and BC1–BC5 (DXT1/3/5/ATI1/ATI2),
-      DX10 header included. Open standards only; content from other
+      — uncompressed bit-mask formats, BC1–BC5 (DXT1/3/5/ATI1/ATI2)
+      and BC7 (own decoder, bit-exact per spec), DX10 header included.
+      Open standards only; content from other
       engines arrives through their official exporters (UE/Unity export
       FBX/USD/glTF themselves).
 - [ ] Format backlog: USD (ASCII subset) and FBX (meshes & animation)
@@ -112,6 +113,9 @@ honest state of repair. ✅ done and test-covered · 🟡 partially built ·
       (`.uasset`/`.umap`, `.unity`) stay unsupported — parked as an
       idea until the vendors publish open formats; game code never
       migrates anyway
+- [ ] Texture backlog: KTX2 (Basis Universal: ETC1S/UASTC), OpenEXR
+      and full mip chains (level 0 only today) — decode-side breadth
+      for the streaming pipeline
 
 ## M5 — Render pipeline V2 ⬜
 

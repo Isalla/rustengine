@@ -5,8 +5,9 @@
 //! skins (skeletons) and animations, and Wavefront OBJ (`.obj`) with
 //! MTL materials on the legacy path. Texture files (`.png`, `.jpg`,
 //! `.tga`, `.bmp`, `.qoi`, `.dds`) decode through [`tex`]; DDS is
-//! decoded natively (uncompressed plus BC1–BC5).
+//! decoded natively (uncompressed plus BC1–BC5 and BC7).
 
+mod bc7;
 mod export;
 mod import;
 pub mod obj;

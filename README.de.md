@@ -135,6 +135,8 @@ halten, `cargo test --workspace` muss grün sein.
 MIT — Copyright (c) 2026 Waldemar Friesen. Wer dieses Projekt oder Teile
 davon weiterverbreitet (auch veränderte Fassungen) muss den Copyright-
 Vermerk und den Lizenztext unverändert übernehmen; siehe [LICENSE](LICENSE).
+Portierter Drittanbieter-Code und mitgelieferte Assets tragen eigene
+Hinweise; siehe [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES.de.md).
 
 Eine freundliche Bitte — völlig freiwillig und keine Bedingung: Wenn ein
 Spiel oder Werkzeug mit dieser Engine entsteht, würde ich mich über einen
