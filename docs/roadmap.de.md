@@ -113,7 +113,10 @@ mit ehrlichem Haken-Stand. ✅ fertig und testabgedeckt · 🟡 teilweise gebaut
       DDS). Mip-Ketten kommen mit der Datei (DDS/KTX2) oder rechnet
       `build_mip_chain`; `re-wgpu` lädt die volle Kette und sampelt
       trilinear. OpenEXR liest das reine Rust-Crate `exr` (linearer
-      Fließkomma wird geklemmt und sRGB-kodiert als RGBA8).
+      Fließkomma wird geklemmt und sRGB-kodiert als RGBA8). ETC2/EAC —
+      das Pi-Zielformat — decodiert ebenfalls nativ (RGB8, RGB8A1,
+      RGBA8, EAC R11/RG11 über eigenen CPU-Decoder); signierte
+      EAC-Formate und ASTC melden klar zurück.
       Nur offene Standards;
       Inhalte aus anderen Engines kommen über deren offizielle Exporter
       (UE/Unity exportieren selbst FBX/USD/glTF).
@@ -123,7 +126,7 @@ mit ehrlichem Haken-Stand. ✅ fertig und testabgedeckt · 🟡 teilweise gebaut
       geparkt, bis die Hersteller offene Formate veröffentlichen;
       Spiel-Code wandert ohnehin nie mit
 - [ ] Textur-Nachzug: Basis-Transcoding in KTX2 (ETC1S, UASTC) und
-      ETC2/EAC-CPU-Decoder (Pi-Zielformat) — Breite auf
+      ASTC-Decodierung — Breite auf
       der Decoder-Seite für den Streaming-Pfad
 
 ## M5 — Render-Pipeline V2 ⬜

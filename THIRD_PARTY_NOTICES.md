@@ -38,6 +38,16 @@ below (choosing the MIT alternative for this port).
 > TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
 > SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
+## ETC2/EAC decoder (`crates/re-io/src/etc2.rs`)
+
+Original Rust implementation written against the OpenGL ES 3.x
+specification (Appendix C: block layouts, modes, modifier tables). No
+code was copied; the packed bit layouts (including the redundancy
+copies of the T, H and planar modes) and the mode discriminator were
+cross-validated against three independent open-source decoders:
+AssetStudio (`etc.cpp`, MIT), ANGLE (`loadimage_etc.cpp`,
+BSD-3-Clause) and SwiftShader (`etcdec.cxx`, Apache-2.0).
+
 ## Inter font (`assets/fonts/inter/`)
 
 Inter by Rasmus Andersson, licensed under the SIL Open Font License

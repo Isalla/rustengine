@@ -10,6 +10,7 @@
 //! transcoder), OpenEXR through the pure-Rust `exr` crate.
 
 mod bc7;
+mod etc2;
 mod export;
 mod import;
 pub mod obj;

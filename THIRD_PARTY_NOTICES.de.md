@@ -19,6 +19,16 @@ die MIT-Variante gewählt. Der MIT-Text (Copyright (c) 2022 Sergii
 Kudlai) ist in der englischen Fassung dieser Datei zitiert; er gilt
 wörtlich auch für diese Übersetzung.
 
+## ETC2/EAC-Decoder (`crates/re-io/src/etc2.rs`)
+
+Eigene Implementierung nach der OpenGL-ES-3.x-Spezifikation
+(Anhang C: Blocklayouts, Modi, Modifier-Tabellen). Es wurde kein Code
+übernommen; die gepackten Bitlayouts (inkl. der Redundanz-Kopien der
+T-, H- und Planar-Modi) und der Modi-Diskriminierer wurden gegen drei
+unabhängige Open-Source-Dekoder abgeglichen: AssetStudio (`etc.cpp`,
+MIT), ANGLE (`loadimage_etc.cpp`, BSD-3-Clause) und SwiftShader
+(`etcdec.cxx`, Apache-2.0).
+
 ## Inter-Schrift (`assets/fonts/inter/`)
 
 Inter von Rasmus Andersson, lizenziert unter der SIL Open Font License

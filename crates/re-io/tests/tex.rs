@@ -270,9 +270,28 @@ fn ktx2_etc1s_kündigt_transcoder_an() {
 }
 
 #[test]
-fn ktx2_etc2_bleibt_pi_ziel() {
-    let e = tex::decode_bytes(&ktx2(147, 4, 4, 0, &[0u8; 8])).unwrap_err();
-    assert!(e.to_string().contains("ETC2"), "klare Ansage: {e}");
+fn ktx2_etc2_rgb8_block() {
+    // Nullblock: Einzel-Modus (Bit 33 = 0), Farbe 0, Index 00 → +2.
+    let d = tex::decode_bytes(&ktx2(147, 4, 4, 0, &[0u8; 8])).unwrap();
+    assert!(d.rgba.chunks_exact(4).all(|p| p == [2, 2, 2, 255]));
+}
+
+#[test]
+fn ktx2_etc2_rgba8_alpha_wort_zuerst() {
+    // 16-Byte-Block: Wort 0 = EAC-Alpha (Multiplikator 0 → Basis 77),
+    // Wort 1 = Farbwort (Einzel, Farbe 0 → +2).
+    let mut b = [0u8; 16];
+    b[0] = 77;
+    let d = tex::decode_bytes(&ktx2(151, 4, 4, 0, &b)).unwrap();
+    assert!(d.rgba.chunks_exact(4).all(|p| p == [2, 2, 2, 77]));
+}
+
+#[test]
+fn ktx2_astc_und_eac_snorm_melden_klar() {
+    let e = tex::decode_bytes(&ktx2(157, 4, 4, 0, &[0u8; 16])).unwrap_err();
+    assert!(e.to_string().contains("ASTC"), "klare Ansage: {e}");
+    let e = tex::decode_bytes(&ktx2(154, 4, 4, 0, &[0u8; 8])).unwrap_err();
+    assert!(e.to_string().contains("SNORM"), "klare Ansage: {e}");
 }
 
 #[test]

@@ -578,7 +578,10 @@ mod ktx2 {
         match vk {
             9 => (w as usize) * (h as usize),
             37 | 43 | 44 | 50 => (w as usize) * (h as usize) * 4,
-            131..=134 | 139 => ((w as usize).div_ceil(4) * (h as usize).div_ceil(4)) * 8,
+            // BC4/ATI1 und ETC2 RGB8/RGB8A1/EAC R11: 8 Byte je Block.
+            131..=134 | 139 | 147..=150 | 153 | 154 => {
+                (w as usize).div_ceil(4) * (h as usize).div_ceil(4) * 8
+            }
             _ => (w as usize).div_ceil(4) * (h as usize).div_ceil(4) * 16,
         }
     }
@@ -619,9 +622,12 @@ mod ktx2 {
             }
             140 | 142 => bail!("ktx2: signierte Blockformate (BC4/BC5 SNORM) passen nicht in RGBA8"),
             143 | 144 => bail!("ktx2: BC6H gehört in die Offline-Pipeline (HDR-Folge)"),
-            147..=158 => {
-                bail!("ktx2: ETC2/EAC ist das Pi-Zielformat — CPU-Decoder folgt als Nachzug")
+            147..=153 | 155 => {
+                crate::etc2::decode_blocks(vk, b, off, width, height, &mut rgba)
+                    .map_err(|e| e.context("ktx2"))?;
             }
+            154 | 156 => bail!("ktx2: signierte EAC-Formate (SNORM) passen nicht in RGBA8"),
+            157 | 158 => bail!("ktx2: ASTC folgt als Nachzug"),
             0 => bail!("ktx2: vkFormat undefined ohne Basis-Superkompression"),
             other => bail!("ktx2: vkFormat {other} wird nicht decodiert"),
         }

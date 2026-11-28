@@ -110,7 +110,9 @@ honest state of repair. ✅ done and test-covered · 🟡 partially built ·
       file (DDS/KTX2) or are computed (`build_mip_chain`); re-wgpu
       uploads the full chain and samples it trilinearly. OpenEXR
       decodes through the pure-Rust `exr` crate (linear float
-      clamped and sRGB-encoded into RGBA8).
+      clamped and sRGB-encoded into RGBA8). ETC2/EAC — the Pi target
+      format — decodes natively too (RGB8, RGB8A1, RGBA8, EAC R11/RG11
+      via own CPU decoder); signed EAC and ASTC answer back cleanly.
       Open standards only; content from other
       engines arrives through their official exporters (UE/Unity export
       FBX/USD/glTF themselves).
@@ -120,7 +122,7 @@ honest state of repair. ✅ done and test-covered · 🟡 partially built ·
       idea until the vendors publish open formats; game code never
       migrates anyway
 - [ ] Texture backlog: Basis transcoding inside KTX2 (ETC1S, UASTC)
-      and ETC2/EAC CPU decode (Pi target format) —
+      and ASTC decode —
       decode-side breadth for the streaming pipeline
 
 ## M5 — Render pipeline V2 ⬜
