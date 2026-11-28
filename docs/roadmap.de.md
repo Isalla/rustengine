@@ -112,7 +112,9 @@ mit ehrlichem Haken-Stand. ✅ fertig und testabgedeckt · 🟡 teilweise gebaut
       ebenfalls nativ (unkomprimiert und BC-Payloads, bitgleich zu
       DDS). Mip-Ketten kommen mit der Datei (DDS/KTX2) oder rechnet
       `build_mip_chain`; `re-wgpu` lädt die volle Kette und sampelt
-      trilinear. Nur offene Standards;
+      trilinear. OpenEXR liest das reine Rust-Crate `exr` (linearer
+      Fließkomma wird geklemmt und sRGB-kodiert als RGBA8).
+      Nur offene Standards;
       Inhalte aus anderen Engines kommen über deren offizielle Exporter
       (UE/Unity exportieren selbst FBX/USD/glTF).
 - [ ] Format-Nachzug: USD (ASCII-Teilmenge) und FBX (Meshes &
@@ -120,8 +122,8 @@ mit ehrlichem Haken-Stand. ✅ fertig und testabgedeckt · 🟡 teilweise gebaut
       (`.uasset`/`.umap`, `.unity`) bleiben unsupported — als Idee
       geparkt, bis die Hersteller offene Formate veröffentlichen;
       Spiel-Code wandert ohnehin nie mit
-- [ ] Textur-Nachzug: Basis-Transcoding in KTX2 (ETC1S, UASTC),
-      ETC2/EAC-CPU-Decoder (Pi-Zielformat) und OpenEXR — Breite auf
+- [ ] Textur-Nachzug: Basis-Transcoding in KTX2 (ETC1S, UASTC) und
+      ETC2/EAC-CPU-Decoder (Pi-Zielformat) — Breite auf
       der Decoder-Seite für den Streaming-Pfad
 
 ## M5 — Render-Pipeline V2 ⬜

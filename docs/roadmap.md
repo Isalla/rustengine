@@ -108,7 +108,9 @@ honest state of repair. ✅ done and test-covered · 🟡 partially built ·
       KTX2 containers decode natively too (uncompressed and BC
       payloads, bit-identical to DDS). Mip chains arrive with the
       file (DDS/KTX2) or are computed (`build_mip_chain`); re-wgpu
-      uploads the full chain and samples it trilinearly.
+      uploads the full chain and samples it trilinearly. OpenEXR
+      decodes through the pure-Rust `exr` crate (linear float
+      clamped and sRGB-encoded into RGBA8).
       Open standards only; content from other
       engines arrives through their official exporters (UE/Unity export
       FBX/USD/glTF themselves).
@@ -117,8 +119,8 @@ honest state of repair. ✅ done and test-covered · 🟡 partially built ·
       (`.uasset`/`.umap`, `.unity`) stay unsupported — parked as an
       idea until the vendors publish open formats; game code never
       migrates anyway
-- [ ] Texture backlog: Basis transcoding inside KTX2 (ETC1S, UASTC),
-      ETC2/EAC CPU decode (Pi target format) and OpenEXR —
+- [ ] Texture backlog: Basis transcoding inside KTX2 (ETC1S, UASTC)
+      and ETC2/EAC CPU decode (Pi target format) —
       decode-side breadth for the streaming pipeline
 
 ## M5 — Render pipeline V2 ⬜

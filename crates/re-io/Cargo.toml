@@ -11,3 +11,4 @@ gltf = { version = "1", default-features = false, features = ["import", "names",
 gltf-json = { version = "1.4.1", features = ["names"] }
 re-core.workspace = true
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "tga", "bmp", "qoi"] }
+exr = "1.5"

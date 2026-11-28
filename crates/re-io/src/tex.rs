@@ -14,8 +14,14 @@
 //! **KTX2** liest `re-io` ebenfalls selbst: unkomprimierte Payloads
 //! (R8/RGBA/BGRA) und die BC-Formate über denselben Block-Decoder wie
 //! DDS (Payloads sind bitgleich). Basis-Superkompression (ETC1S/UASTC)
-//! und ETC2 melden klare Fehler — zusammen mit EXR und Mip-Ketten
-//! stehen sie im Textur-Nachzug der Roadmap.
+//! und ETC2 melden klare Fehler — sie stehen mit im Textur-Nachzug
+//! der Roadmap.
+//!
+//! **OpenEXR** dekodiert das `exr`-Crate (reines Rust). EXR ist
+//! linearer Fließkomma; für den RGBA8-Pfad wird klemmt und
+//! sRGB-kodiert, damit Albedo aussieht wie eine PNG-Textur. Echte
+//! HDR-Pipeline (Float-Texturen, Tonemapping im Shader) folgt später;
+//! eigene Mip-Stufen aus der Datei ebenfalls.
 //!
 //! Mip-Ketten: DDS und KTX2 liefern eigene Stufen — alle
 //! deklarierten und vollständigen wandern in [`Decoded::mips`];
@@ -98,6 +104,9 @@ pub fn decode_bytes(bytes: &[u8]) -> anyhow::Result<Decoded> {
     if bytes.starts_with(&ktx2::MAGIC) {
         return ktx2::decode(bytes);
     }
+    if bytes.starts_with(&EXR_MAGIC) {
+        return decode_exr(bytes);
+    }
     let reader = image::ImageReader::new(std::io::Cursor::new(bytes))
         .with_guessed_format()?;
     if reader.format().is_none() {
@@ -111,7 +120,7 @@ pub fn decode_bytes(bytes: &[u8]) -> anyhow::Result<Decoded> {
 
 /// Endungen, die [`decode`] versteht (für Auswahl-Dialoge/Doku).
 pub const TEXTURE_EXTENSIONS: &[&str] =
-    &["png", "jpg", "jpeg", "tga", "bmp", "qoi", "dds", "ktx2"];
+    &["png", "jpg", "jpeg", "tga", "bmp", "qoi", "dds", "ktx2", "exr"];
 
 // ── DDS ──────────────────────────────────────────────────────────────
 
@@ -677,4 +686,64 @@ mod ktx2 {
         let rgba = base.ok_or_else(|| anyhow::anyhow!("ktx2: Datendatei zu kurz"))?;
         Ok(Decoded { width, height, rgba, mips })
     }
+}
+
+// ── OpenEXR ──────────────────────────────────────────────────────────
+
+/// EXR-Magic: 0x01312F76 little-endian.
+const EXR_MAGIC: [u8; 4] = [0x76, 0x2f, 0x31, 0x01];
+
+/// RGBA8-Speicher für den EXR-Durchstich; der Wächter sitzt im
+/// Konstruktor der Deklaration (kein Panic bei Riesenköpfen).
+struct ExrRgba {
+    w: usize,
+    h: usize,
+    px: Vec<u8>,
+}
+
+/// Lineares Fließkomma nach RGBA8: klemmen, dann sRGB-kodieren —
+/// damit ein EXR-Albedo dieselbe Bytesprache spricht wie PNG. Wer
+/// echtes HDR will, wartet auf Float-Texturen (BC6H-Zweig).
+fn exr_ldr(v: f32) -> u8 {
+    (v.clamp(0.0, 1.0).powf(1.0 / 2.2) * 255.0 + 0.5) as u8
+}
+
+fn decode_exr(b: &[u8]) -> Result<Decoded> {
+    use exr::prelude::*;
+    let img = read()
+        .no_deep_data()
+        .largest_resolution_level()
+        .rgba_channels(
+            |resolution: Vec2<usize>, _| {
+                let (w, h) = (resolution.x(), resolution.y());
+                let n = match w.checked_mul(h) {
+                    Some(n) if w <= 16384 && h <= 16384 && n > 0 => n,
+                    _ => 0,
+                };
+                ExrRgba { w, h, px: vec![0u8; n.saturating_mul(4)] }
+            },
+            |store: &mut ExrRgba, Vec2(x, y), (r, g, b_, a): (f32, f32, f32, f32)| {
+                if x >= store.w || y >= store.h {
+                    return; // Wächter hat abgelehnt — Rest ignoriert
+                }
+                let o = (y * store.w + x) * 4;
+                store.px[o] = exr_ldr(r);
+                store.px[o + 1] = exr_ldr(g);
+                store.px[o + 2] = exr_ldr(b_);
+                store.px[o + 3] = (a.clamp(0.0, 1.0) * 255.0 + 0.5) as u8;
+            },
+        )
+        .first_valid_layer()
+        .all_attributes()
+        .from_buffered(std::io::Cursor::new(b))?;
+    let store = img.layer_data.channel_data.pixels;
+    if store.px.is_empty() {
+        anyhow::bail!("exr: Maße {}x{} unplausibel", store.w, store.h);
+    }
+    Ok(Decoded {
+        width: store.w as u32,
+        height: store.h as u32,
+        rgba: store.px,
+        mips: Vec::new(),
+    })
 }

@@ -382,3 +382,37 @@ fn build_mip_chain_ungerade_kanten() {
     assert_eq!(chain.len(), 1);
     assert_eq!(&chain[0].rgba[..], &[8, 8, 8, 8]);
 }
+
+// ── OpenEXR ──────────────────────────────────────────────────────────
+
+#[test]
+fn exr_klemmt_und_kodiert_srgb() {
+    // Linear geschrieben: 0, 0.5 und 4.0 → 0, 186 (0.5^(1/2.2)·255)
+    // und 255 (geklemmt). Alpha 1.0 → 255.
+    let mut path = std::env::temp_dir();
+    path.push(format!("re_io_exr_{}.exr", std::process::id()));
+    exr::prelude::write_rgba_file(&path, 2, 2, |x, y| {
+        let v: f32 = match (x, y) {
+            (0, 0) => 0.0,
+            (1, 0) => 0.5,
+            _ => 4.0,
+        };
+        (v, v, v, 1.0)
+    })
+    .unwrap();
+    let bytes = std::fs::read(&path).unwrap();
+    let _ = std::fs::remove_file(&path);
+    let d = tex::decode_bytes(&bytes).unwrap();
+    assert_eq!((d.width, d.height), (2, 2));
+    assert_eq!(&d.rgba[0..4], &[0, 0, 0, 255]);
+    assert_eq!(&d.rgba[4..8], &[186, 186, 186, 255]);
+    assert_eq!(&d.rgba[12..16], &[255, 255, 255, 255]);
+}
+
+#[test]
+fn exr_kopf_abgeschnitten_ist_fehler() {
+    // Magic + Kachel-Flag + Längenfeld, aber kein vollständiger Kopf.
+    let mut b = vec![0x76, 0x2f, 0x31, 0x01, 0x02, 0, 0, 0, 0x20, 0, 0, 0];
+    b.extend_from_slice(b"restlos");
+    assert!(tex::decode_bytes(&b).is_err());
+}
