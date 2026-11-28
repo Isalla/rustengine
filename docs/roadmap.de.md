@@ -127,7 +127,11 @@ mit ehrlichem Haken-Stand. ✅ fertig und testabgedeckt · 🟡 teilweise gebaut
       Nur offene Standards;
       Inhalte aus anderen Engines kommen über deren offizielle Exporter
       (UE/Unity exportieren selbst FBX/USD/glTF).
-- [ ] Format-Nachzug: USD (ASCII-Teilmenge) als weiterer Importierer;
+- [x] Format-Nachzug: USD (ASCII-Teilmenge) als weiterer Importierer —
+      `.usda`/`.usd` über eigenen Leser: Prim-Baum, Xform-Ops, Meshes
+      (Polygon-Fächer, Händigkeit korrigiert), UsdShade-Vorschau-
+      Materialien mit vererbten Bindungen, Z-up-Korrekturknoten;
+      Referenzen, Varianten und binäres `.usdc` melden sauber zurück.
       proprietäre Szenenformate
       (`.uasset`/`.umap`, `.unity`) bleiben unsupported — als Idee
       geparkt, bis die Hersteller offene Formate veröffentlichen;

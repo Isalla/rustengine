@@ -5,7 +5,7 @@
 | Crate | Job |
 |---|---|
 | `re-core` | Data model: scene graph, meshes, materials, animations, terrain, tilesets |
-| `re-io` | Scene file I/O: glTF 2.0/GLB, OBJ+MTL; texture loading with mip chains, incl. native DDS (BC1–BC5, BC7), KTX2 containers (uncompressed + BC payloads) and OpenEXR |
+| `re-io` | Scene file I/O: glTF 2.0/GLB, OBJ+MTL, binary FBX (≥ 7.4) and the USD ASCII subset; texture loading with mip chains, incl. native DDS (BC1–BC5, BC7), KTX2 containers (uncompressed + BC, ETC2/EAC, ASTC) and OpenEXR |
 | `re-ecs` | Entity-component-system: world, sparse-set storage, schedule |
 | `re-world` | World partition: grid, clipmap, tiers, streaming, HLOD, telemetry, ego handoff |
 | `re-render` | Backend-neutral render layer: `GfxBackend` trait, camera, draw batches |

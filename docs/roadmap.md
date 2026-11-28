@@ -123,7 +123,11 @@ honest state of repair. ✅ done and test-covered · 🟡 partially built ·
       Open standards only; content from other
       engines arrives through their official exporters (UE/Unity export
       FBX/USD/glTF themselves).
-- [ ] Format backlog: USD (ASCII subset) as a further importer.
+- [x] Format backlog: USD (ASCII subset) as a further importer —
+      `.usda`/`.usd` through the own reader: prim tree, xformOps,
+      meshes (polygon fan, handedness fix), UsdShade preview materials
+      with inherited bindings, Z-up fix-up root; references, variants
+      and binary `.usdc` answer back cleanly.
       Proprietary scene formats
       (`.uasset`/`.umap`, `.unity`) stay unsupported — parked as an
       idea until the vendors publish open formats; game code never
