@@ -17,8 +17,11 @@
 //! und ETC2 melden klare Fehler — zusammen mit EXR und Mip-Ketten
 //! stehen sie im Textur-Nachzug der Roadmap.
 //!
-//! Mip-Ketten: gelesen wird Stufe 0 — der Streaming-Pfad baut seine
-//! eigenen Stufen; DDS-Dateien mit Mips dürfen nicht scheitern.
+//! Mip-Ketten: DDS und KTX2 liefern eigene Stufen — alle
+//! deklarierten und vollständigen wandern in [`Decoded::mips`];
+//! abgeschnittene Ketten reduzieren sich auf die brauchbaren Stufen,
+//! statt zu scheitern. Für Formate ohne Mips rechnet
+//! [`build_mip_chain`] die Kette.
 
 use anyhow::Result;
 use std::fs;
@@ -31,6 +34,52 @@ pub struct Decoded {
     pub width: u32,
     pub height: u32,
     pub rgba: Vec<u8>,
+    /// Weitere Stufen, wie die Datei sie liefert (DDS, KTX2); Formate
+    /// ohne Mips lassen das Feld leer — aufrufende Seiten können die
+    /// Kette mit [`build_mip_chain`] ergänzen.
+    pub mips: Vec<Mip>,
+}
+
+/// Eine Mip-Stufe (Maße in Texel, RGBA wie bei [`Decoded`]).
+#[derive(Debug)]
+pub struct Mip {
+    pub width: u32,
+    pub height: u32,
+    pub rgba: Vec<u8>,
+}
+
+/// Box-Filter-Kette für Formate ohne Mips im Kopf: jede Stufe
+/// halbiert (abgerundet, mindestens 1) und mittelt 2×2 mit
+/// Klemmen an ungeraden Kanten — billig, ohne Abhängigkeit, und
+/// für Streaming näherungsweise GPU-trilinear.
+pub fn build_mip_chain(rgba: &[u8], width: u32, height: u32) -> Vec<Mip> {
+    let mut chain = Vec::new();
+    let (mut w, mut h) = (width.max(1), height.max(1));
+    let mut cur: Vec<u8> = rgba.to_vec();
+    while w > 1 || h > 1 {
+        let (nw, nh) = ((w / 2).max(1), (h / 2).max(1));
+        let mut next = vec![0u8; (nw * nh * 4) as usize];
+        for y in 0..nh {
+            let sy = (2 * y).min(h - 1);
+            let sy1 = (2 * y + 1).min(h - 1);
+            for x in 0..nw {
+                let sx = (2 * x).min(w - 1);
+                let sx1 = (2 * x + 1).min(w - 1);
+                for c in 0..4 {
+                    let a = cur[(sy * w + sx) as usize * 4 + c] as u32;
+                    let b = cur[(sy * w + sx1) as usize * 4 + c] as u32;
+                    let d = cur[(sy1 * w + sx) as usize * 4 + c] as u32;
+                    let e = cur[(sy1 * w + sx1) as usize * 4 + c] as u32;
+                    next[(y * nw + x) as usize * 4 + c] = ((a + b + d + e + 2) / 4) as u8;
+                }
+            }
+        }
+        chain.push(Mip { width: nw, height: nh, rgba: next });
+        cur = chain.last().unwrap().rgba.clone();
+        w = nw;
+        h = nh;
+    }
+    chain
 }
 
 /// Textur anhand des Dateiinhalts decodieren (Magie schlägt Endung).
@@ -57,7 +106,7 @@ pub fn decode_bytes(bytes: &[u8]) -> anyhow::Result<Decoded> {
     let img = reader.decode()?;
     let rgba = img.to_rgba8();
     let (w, h) = (rgba.width(), rgba.height());
-    Ok(Decoded { width: w, height: h, rgba: rgba.into_raw() })
+    Ok(Decoded { width: w, height: h, rgba: rgba.into_raw(), mips: Vec::new() })
 }
 
 /// Endungen, die [`decode`] versteht (für Auswahl-Dialoge/Doku).
@@ -67,7 +116,7 @@ pub const TEXTURE_EXTENSIONS: &[&str] =
 // ── DDS ──────────────────────────────────────────────────────────────
 
 mod dds {
-    use super::Decoded;
+    use super::{Decoded, Mip};
     use anyhow::{Result, bail};
 
     const DDPF_ALPHAPIXELS: u32 = 0x1;
@@ -280,6 +329,99 @@ mod dds {
         Ok(())
     }
 
+    /// Nach Level entscheidbare Pixelformat-Auswahl.
+    enum Sel {
+        Blocks([u8; 4]),
+        Rgba { bpp: u32, masks: [u32; 4], alpha: bool },
+        Luma { bpp: u32, alpha_only: bool, la8: bool },
+    }
+
+    fn block_bytes(four: &[u8; 4]) -> usize {
+        match four {
+            b"DXT1" | b"BC1 " | b"ATI1" | b"BC4 " => 8,
+            _ => 16,
+        }
+    }
+
+    /// Bytes einer Mip-Stufe bei gegebenen Maßen.
+    fn level_bytes(sel: &Sel, w: u32, h: u32) -> usize {
+        match sel {
+            Sel::Blocks(four) => {
+                (w as usize).div_ceil(4) * (h as usize).div_ceil(4) * block_bytes(four)
+            }
+            Sel::Rgba { bpp, .. } | Sel::Luma { bpp, .. } => {
+                (w as usize) * (h as usize) * (*bpp as usize / 8)
+            }
+        }
+    }
+
+    /// Eine Stufe nach RGBA decodieren; Datengröße muss die
+    /// aufrufende Seite über [`level_bytes`] sichergestellt haben.
+    fn decode_level(b: &[u8], off: usize, width: u32, height: u32, sel: &Sel) -> Result<Vec<u8>> {
+        let pixels = (width as usize) * (height as usize);
+        let mut rgba = vec![0u8; pixels * 4];
+        match sel {
+            Sel::Blocks(four) => decode_blocks(b, off, width, height, four, &mut rgba)?,
+            Sel::Rgba { bpp, masks, alpha } => {
+                // Unkomprimiert: nach Bitmasken entpacken.
+                let take = |c: u64, m: u32| -> u8 {
+                    if m == 0 {
+                        return 0;
+                    }
+                    let lo = m.trailing_zeros();
+                    let n = m.count_ones();
+                    let raw = ((c >> lo) & (m >> lo) as u64) as u32;
+                    widen(raw, n)
+                };
+                let [mr, mg, mb, ma] = *masks;
+                for i in 0..pixels {
+                    let step = (*bpp / 8) as usize;
+                    let o = off + i * step;
+                    if o + step > b.len() {
+                        bail!("dds: Datendatei zu kurz");
+                    }
+                    let c = if *bpp == 32 {
+                        u32::from_le_bytes([b[o], b[o + 1], b[o + 2], b[o + 3]]) as u64
+                    } else {
+                        u16::from_le_bytes([b[o], b[o + 1]]) as u64
+                    };
+                    rgba[i * 4] = take(c, mr);
+                    rgba[i * 4 + 1] = take(c, mg);
+                    rgba[i * 4 + 2] = take(c, mb);
+                    rgba[i * 4 + 3] = if *alpha { take(c, ma) } else { 255 };
+                }
+            }
+            Sel::Luma { bpp, alpha_only, la8 } => {
+                // L8 / A8 / LA8 / L16 — Graustufen und reine Alpha-Kanäle.
+                for i in 0..pixels {
+                    if *bpp == 8 {
+                        let o = off + i;
+                        if o >= b.len() {
+                            bail!("dds: Datendatei zu kurz");
+                        }
+                        let v = b[o];
+                        let px = if *alpha_only { [0, 0, 0, v] } else { [v, v, v, 255] };
+                        rgba[i * 4..i * 4 + 4].copy_from_slice(&px);
+                    } else {
+                        let o = off + i * 2;
+                        if o + 2 > b.len() {
+                            bail!("dds: Datendatei zu kurz");
+                        }
+                        let px = if *la8 {
+                            [b[o], b[o], b[o], b[o + 1]]
+                        } else {
+                            let c = u16::from_le_bytes([b[o], b[o + 1]]);
+                            let l = ((c as u32 * 255) / 65535) as u8;
+                            [l, l, l, 255]
+                        };
+                        rgba[i * 4..i * 4 + 4].copy_from_slice(&px);
+                    }
+                }
+            }
+        }
+        Ok(rgba)
+    }
+
     pub fn decode(b: &[u8]) -> Result<Decoded> {
         if b.len() < 128 || !b.starts_with(b"DDS ") {
             bail!("dds: Kopf fehlt");
@@ -297,8 +439,8 @@ mod dds {
         let masks = [u32le(b, 92)?, u32le(b, 96)?, u32le(b, 100)?, u32le(b, 104)?];
         let mut data_off = 128usize;
 
-        // DX10-Erweiterungskopf: Format steht im DXGI-Feld, nicht im VierCC.
-        if four == *b"DX10" {
+        // Formatwahl; DX10-Kopf trägt das Format im DXGI-Feld statt im VierCC.
+        let sel = if four == *b"DX10" {
             if b.len() < 148 {
                 bail!("dds: DX10-Kopf abgeschnitten");
             }
@@ -318,31 +460,10 @@ mod dds {
                 ),
             };
             data_off = 148;
-            let pixels = (width as usize) * (height as usize);
-            let mut rgba = vec![0u8; pixels * 4];
-            decode_blocks(b, data_off, width, height, &four_like, &mut rgba)?;
-            return Ok(Decoded { width, height, rgba });
-        }
-
-        let pixels = (width as usize) * (height as usize);
-        let mut rgba = vec![0u8; pixels * 4];
-
-        if pf_flags & DDPF_FOURCC != 0 {
-            decode_blocks(b, data_off, width, height, &four, &mut rgba)?;
-            return Ok(Decoded { width, height, rgba });
-        }
-
-        // Unkomprimiert: nach Bitmasken entpacken.
-        let take = |c: u64, m: u32| -> u8 {
-            if m == 0 {
-                return 0;
-            }
-            let lo = m.trailing_zeros();
-            let n = m.count_ones();
-            let raw = ((c >> lo) & (m >> lo) as u64) as u32;
-            widen(raw, n)
-        };
-        if pf_flags & DDPF_RGB != 0 {
+            Sel::Blocks(four_like)
+        } else if pf_flags & DDPF_FOURCC != 0 {
+            Sel::Blocks(four)
+        } else if pf_flags & DDPF_RGB != 0 {
             match bpp {
                 32 | 16 => {
                     // 16-Bit ohne Masken: stillschweigend 5-6-5 annehmen.
@@ -350,73 +471,60 @@ mod dds {
                     if bpp == 16 && masks == [0, 0, 0, 0] {
                         masks = [0x7C00, 0x03E0, 0x001F, 0];
                     }
-                    let [mr, mg, mb, ma] = masks;
-                    for i in 0..pixels {
-                        let step = (bpp / 8) as usize;
-                        let o = data_off + i * step;
-                        if o + step > b.len() {
-                            bail!("dds: Datendatei zu kurz");
-                        }
-                        let c = if bpp == 32 {
-                            u32::from_le_bytes([b[o], b[o + 1], b[o + 2], b[o + 3]]) as u64
-                        } else {
-                            u16::from_le_bytes([b[o], b[o + 1]]) as u64
-                        };
-                        let alpha = if pf_flags & DDPF_ALPHAPIXELS != 0 { take(c, ma) } else { 255 };
-                        rgba[i * 4] = take(c, mr);
-                        rgba[i * 4 + 1] = take(c, mg);
-                        rgba[i * 4 + 2] = take(c, mb);
-                        rgba[i * 4 + 3] = alpha;
-                    }
+                    Sel::Rgba { bpp, masks, alpha: pf_flags & DDPF_ALPHAPIXELS != 0 }
                 }
                 other => bail!("dds: RGB mit {other} bit/pixel nicht unterstützt"),
             }
         } else if pf_flags & DDPF_LUMINANCE != 0 || pf_flags & 0x2 != 0 {
-            // L8 / A8 / LA8 / L16 — Graustufen und reine Alpha-Kanäle.
             match bpp {
-                8 => {
-                    let alpha_only = pf_flags & DDPF_LUMINANCE == 0;
-                    for i in 0..pixels {
-                        let o = data_off + i;
-                        if o >= b.len() {
-                            bail!("dds: Datendatei zu kurz");
-                        }
-                        let v = b[o];
-                        let px = if alpha_only { [0, 0, 0, v] } else { [v, v, v, 255] };
-                        rgba[i * 4..i * 4 + 4].copy_from_slice(&px);
-                    }
-                }
-                16 => {
-                    // LA8 (Luminanz+Alpha je 8 Bit) von L16 unterscheiden.
-                    let la8 = pf_flags & DDPF_ALPHAPIXELS != 0;
-                    for i in 0..pixels {
-                        let o = data_off + i * 2;
-                        if o + 2 > b.len() {
-                            bail!("dds: Datendatei zu kurz");
-                        }
-                        let px = if la8 {
-                            [b[o], b[o], b[o], b[o + 1]]
-                        } else {
-                            let c = u16::from_le_bytes([b[o], b[o + 1]]);
-                            let l = ((c as u32 * 255) / 65535) as u8;
-                            [l, l, l, 255]
-                        };
-                        rgba[i * 4..i * 4 + 4].copy_from_slice(&px);
-                    }
-                }
+                8 | 16 => Sel::Luma {
+                    bpp,
+                    alpha_only: pf_flags & DDPF_LUMINANCE == 0,
+                    la8: bpp == 16 && pf_flags & DDPF_ALPHAPIXELS != 0,
+                },
                 other => bail!("dds: Luminanz/Alpha mit {other} bit/pixel nicht unterstützt"),
             }
         } else {
             bail!("dds: unbekanntes pixelFormat (flags {pf_flags:#x})");
+        };
+
+        // Mip-Stufen: dwMipMapCount bei 28 (0 gezählt wie 1).
+        // Würfeldateien (dwCaps2 0x200/0x400) über springen die Stufen
+        // über alle faces — für sie bleibt vorerst Stufe 0 von face 0.
+        let want = u32le(b, 28)?.max(1);
+        let cube = u32le(b, 112)? & 0x600 != 0;
+        let mip_count = if cube { 1 } else { want };
+
+        let mut base: Option<Vec<u8>> = None;
+        let mut mips = Vec::new();
+        let mut off = data_off;
+        let (mut lw, mut lh) = (width, height);
+        for i in 0..mip_count {
+            let need = level_bytes(&sel, lw, lh);
+            if i > 0 && off + need > b.len() {
+                // Abgeschnittene Kette: was vollständig da ist, gilt —
+                // Stufe 0 bleibt trotzdem lesbar.
+                break;
+            }
+            let px = decode_level(b, off, lw, lh, &sel)?;
+            match &base {
+                None => base = Some(px),
+                Some(_) => mips.push(Mip { width: lw, height: lh, rgba: px }),
+            }
+            off += need;
+            lw = (lw / 2).max(1);
+            lh = (lh / 2).max(1);
         }
-        Ok(Decoded { width, height, rgba })
+        let rgba = base.ok_or_else(|| anyhow::anyhow!("dds: Datendatei zu kurz"))?;
+        Ok(Decoded { width, height, rgba, mips })
     }
 }
 
 // ── KTX 2.0 ──────────────────────────────────────────────────────────
 
 mod ktx2 {
-    //! KTX2-Container: gelesen wird Stufe 0 direkt nach RGBA8.
+    //! KTX2-Container: deklarierte Stufen wandern nach RGBA8 (wie bei
+    //! DDS); abgeschnittene Ketten reduzieren sich, statt zu scheitern.
     //!
     //! Verstanden werden unkomprimizierte Payloads (R8, RGBA, BGRA —
     //! zeilenmajor von oben, wie DDS) und die blockkomprimierten
@@ -426,7 +534,7 @@ mod ktx2 {
     //! Transcoder einzieht; ETC2/EAC bleibt als Pi-Zielformat
     //! angekündigt. Cubemap, 3D und Arrays folgen später.
 
-    use super::Decoded;
+    use super::{Decoded, Mip};
     use anyhow::{Result, bail};
 
     pub const MAGIC: [u8; 12] =
@@ -456,32 +564,18 @@ mod ktx2 {
         Ok(dfd_end.max(kvd_end).max(sgd_end).next_multiple_of(4))
     }
 
-    pub fn decode(b: &[u8]) -> Result<Decoded> {
-        if b.len() < 80 || !b.starts_with(&MAGIC) {
-            bail!("ktx2: Kopf fehlt");
+    /// Bytes einer Stufe bei gegebener vkFormat-Nummer.
+    fn vk_bytes(vk: u32, w: u32, h: u32) -> usize {
+        match vk {
+            9 => (w as usize) * (h as usize),
+            37 | 43 | 44 | 50 => (w as usize) * (h as usize) * 4,
+            131..=134 | 139 => ((w as usize).div_ceil(4) * (h as usize).div_ceil(4)) * 8,
+            _ => (w as usize).div_ceil(4) * (h as usize).div_ceil(4) * 16,
         }
-        let vk = u32le(b, 12);
-        let width = u32le(b, 20);
-        let height = u32le(b, 24);
-        let depth = u32le(b, 28);
-        let layers = u32le(b, 32);
-        let faces = u32le(b, 36);
-        let levels = u32le(b, 40);
-        let supercomp = u32le(b, 44);
-        if width == 0 || height == 0 || width > 16384 || height > 16384 {
-            bail!("ktx2: Maße {width}x{height} unplausibel");
-        }
-        if depth != 0 || faces != 1 || layers > 1 {
-            bail!("ktx2: nur 2D-Einzeltexturen (3D/Cube/Array kommen später)");
-        }
-        match supercomp {
-            0 => {}
-            1 => bail!("ktx2: BasisLZSS (ETC1S) — Transcoder steht noch aus"),
-            2 => bail!("ktx2: Zstd-Superkompression (UASTC) — Entpacker steht noch aus"),
-            other => bail!("ktx2: Superkompression {other} unbekannt"),
-        }
-        let off = level0_offset(b, levels)?;
+    }
 
+    /// Eine Stufe nach RGBA; Dekoder teilen sich den Block-Pfad mit DDS.
+    fn decode_level(vk: u32, b: &[u8], off: usize, width: u32, height: u32) -> Result<Vec<u8>> {
         let pixels = (width as usize) * (height as usize);
         let mut rgba = vec![0u8; pixels * 4];
         let short = |what: &str| anyhow::anyhow!("ktx2: {what}");
@@ -522,6 +616,65 @@ mod ktx2 {
             0 => bail!("ktx2: vkFormat undefined ohne Basis-Superkompression"),
             other => bail!("ktx2: vkFormat {other} wird nicht decodiert"),
         }
-        Ok(Decoded { width, height, rgba })
+        Ok(rgba)
+    }
+
+    pub fn decode(b: &[u8]) -> Result<Decoded> {
+        if b.len() < 80 || !b.starts_with(&MAGIC) {
+            bail!("ktx2: Kopf fehlt");
+        }
+        let vk = u32le(b, 12);
+        let width = u32le(b, 20);
+        let height = u32le(b, 24);
+        let depth = u32le(b, 28);
+        let layers = u32le(b, 32);
+        let faces = u32le(b, 36);
+        let levels = u32le(b, 40);
+        let supercomp = u32le(b, 44);
+        if width == 0 || height == 0 || width > 16384 || height > 16384 {
+            bail!("ktx2: Maße {width}x{height} unplausibel");
+        }
+        if depth != 0 || faces != 1 || layers > 1 {
+            bail!("ktx2: nur 2D-Einzeltexturen (3D/Cube/Array kommen später)");
+        }
+        match supercomp {
+            0 => {}
+            1 => bail!("ktx2: BasisLZSS (ETC1S) — Transcoder steht noch aus"),
+            2 => bail!("ktx2: Zstd-Superkompression — Entpacker steht noch aus"),
+            other => bail!("ktx2: Superkompression {other} unbekannt"),
+        }
+
+        // Stufen: mit levelCount >= 1 steht der Index (24 Byte je
+        // Eintrag) direkt hinter dem Kopf; bei levelCount 0 fehlt er —
+        // dann gibt es genau die eine berechnete Grundstufe.
+        let count = if levels >= 1 { levels } else { 1 };
+        let mut base: Option<Vec<u8>> = None;
+        let mut mips: Vec<Mip> = Vec::new();
+        let (mut lw, mut lh) = (width, height);
+        for i in 0..count {
+            let off = if levels >= 1 {
+                if b.len() < 80 + (i as usize + 1) * 24 {
+                    break; // Index abgeschnitten
+                }
+                u64le(b, 80 + i as usize * 24) as usize
+            } else {
+                if i > 0 {
+                    break;
+                }
+                level0_offset(b, 0)?
+            };
+            if i > 0 && off + vk_bytes(vk, lw, lh) > b.len() {
+                break; // abgeschnittene Kette: Rest weglassen, Stufe 0 gilt
+            }
+            let px = decode_level(vk, b, off, lw, lh)?;
+            match &base {
+                None => base = Some(px),
+                Some(_) => mips.push(Mip { width: lw, height: lh, rgba: px }),
+            }
+            lw = (lw / 2).max(1);
+            lh = (lh / 2).max(1);
+        }
+        let rgba = base.ok_or_else(|| anyhow::anyhow!("ktx2: Datendatei zu kurz"))?;
+        Ok(Decoded { width, height, rgba, mips })
     }
 }

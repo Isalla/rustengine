@@ -110,7 +110,9 @@ mit ehrlichem Haken-Stand. ✅ fertig und testabgedeckt · 🟡 teilweise gebaut
       (DXT1/3/5/ATI1/ATI2) und BC7 (eigener Decoder, bitgenau nach
       Spezifikation), inklusive DX10-Kopf. KTX2-Container liest es
       ebenfalls nativ (unkomprimiert und BC-Payloads, bitgleich zu
-      DDS). Nur offene Standards;
+      DDS). Mip-Ketten kommen mit der Datei (DDS/KTX2) oder rechnet
+      `build_mip_chain`; `re-wgpu` lädt die volle Kette und sampelt
+      trilinear. Nur offene Standards;
       Inhalte aus anderen Engines kommen über deren offizielle Exporter
       (UE/Unity exportieren selbst FBX/USD/glTF).
 - [ ] Format-Nachzug: USD (ASCII-Teilmenge) und FBX (Meshes &
@@ -119,8 +121,7 @@ mit ehrlichem Haken-Stand. ✅ fertig und testabgedeckt · 🟡 teilweise gebaut
       geparkt, bis die Hersteller offene Formate veröffentlichen;
       Spiel-Code wandert ohnehin nie mit
 - [ ] Textur-Nachzug: Basis-Transcoding in KTX2 (ETC1S, UASTC),
-      ETC2/EAC-CPU-Decoder (Pi-Zielformat), OpenEXR und vollständige
-      Mip-Ketten (heute nur Stufe 0) — Breite auf
+      ETC2/EAC-CPU-Decoder (Pi-Zielformat) und OpenEXR — Breite auf
       der Decoder-Seite für den Streaming-Pfad
 
 ## M5 — Render-Pipeline V2 ⬜

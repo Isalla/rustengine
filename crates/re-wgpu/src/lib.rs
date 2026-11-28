@@ -473,6 +473,7 @@ impl WgpuBackend {
             address_mode_v: wgpu::AddressMode::ClampToEdge,
             mag_filter: wgpu::FilterMode::Linear,
             min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::MipmapFilterMode::Linear,
             ..Default::default()
         });
 
@@ -1023,6 +1024,17 @@ impl Inner {
         }
         let img = re_io::tex::decode(std::path::Path::new(path)).ok()?;
         let (w, h) = (img.width, img.height);
+        // Mip-Kette: mitgelieferte Stufen (DDS/KTX2) bevorzugt, sonst
+        // rechnerisch ergänzen — Streaming ohne Mips ist Kantenflimmern.
+        let chain = if img.mips.is_empty() {
+            re_io::tex::build_mip_chain(&img.rgba, w, h)
+        } else {
+            img.mips
+        };
+        // wgpu erlaubt nur floor(log2(max))+1 Stufen; Dateien, die mehr
+        // erklären, werden schlicht beschnitten.
+        let cap = (w.max(h) as f32).log2().floor() as u32 + 1;
+        let mip_count = (1 + chain.len() as u32).min(cap);
         let tex = self.device.create_texture(&wgpu::TextureDescriptor {
             label: Some("albedo"),
             size: wgpu::Extent3d {
@@ -1030,7 +1042,7 @@ impl Inner {
                 height: h,
                 depth_or_array_layers: 1,
             },
-            mip_level_count: 1,
+            mip_level_count: mip_count,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: wgpu::TextureFormat::Rgba8UnormSrgb,
@@ -1056,6 +1068,27 @@ impl Inner {
                 depth_or_array_layers: 1,
             },
         );
+        for (i, m) in chain.iter().take(mip_count as usize - 1).enumerate() {
+            self.queue.write_texture(
+                wgpu::TexelCopyTextureInfo {
+                    texture: &tex,
+                    mip_level: 1 + i as u32,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                },
+                &m.rgba,
+                wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(m.width * 4),
+                    rows_per_image: None,
+                },
+                wgpu::Extent3d {
+                    width: m.width,
+                    height: m.height,
+                    depth_or_array_layers: 1,
+                },
+            );
+        }
         let view = tex.create_view(&wgpu::TextureViewDescriptor::default());
         self.tex_cache
             .insert(path.to_string(), (tex, view.clone()));

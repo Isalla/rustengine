@@ -281,3 +281,104 @@ fn ktx2_kopf_muss_volständig_sein() {
     b.truncate(60);
     assert!(tex::decode_bytes(&b).is_err());
 }
+
+// ── Mip-Ketten ───────────────────────────────────────────────────────
+
+#[test]
+fn dds_dxt1_liefert_mip_kette() {
+    // 4×4 plus 2×2: zwei volle DXT1-Blöcke, dwMipMapCount = 2.
+    let mut b = dds_header(4, 4, PF_FOURCC, *b"DXT1", 0, [0; 4]);
+    b[28..32].copy_from_slice(&2u32.to_le_bytes());
+    b.extend_from_slice(&[0xFF, 0xFF, 0, 0, 0, 0, 0, 0]); // 4×4 weiß
+    b.extend_from_slice(&[0xFF, 0xFF, 0, 0, 0, 0, 0, 0]); // 2×2 weiß
+    let d = tex::decode_bytes(&b).unwrap();
+    assert_eq!(d.mips.len(), 1);
+    assert_eq!((d.mips[0].width, d.mips[0].height), (2, 2));
+    assert!(d.mips[0].rgba.chunks_exact(4).all(|p| p == [255, 255, 255, 255]));
+}
+
+#[test]
+fn dds_abgeschnittene_kette_behält_stufe_null() {
+    let mut b = dds_header(4, 4, PF_FOURCC, *b"DXT1", 0, [0; 4]);
+    b[28..32].copy_from_slice(&4u32.to_le_bytes());
+    b.extend_from_slice(&[0xFF, 0xFF, 0, 0, 0, 0, 0, 0]); // nur Stufe 0 da
+    let d = tex::decode_bytes(&b).unwrap();
+    assert_eq!((d.width, d.height), (4, 4));
+    assert!(d.mips.is_empty());
+    assert_eq!(&d.rgba[0..4], &[255, 255, 255, 255]);
+}
+
+#[test]
+fn dds_l8_mit_zweiter_stufe() {
+    // 2×2 Luminanz, Stufe 1 = 1×1: Durchschnitt der vier Werte.
+    let mut b = dds_header(2, 2, PF_LUM, *b"\0\0\0\0", 8, [0; 4]);
+    b[28..32].copy_from_slice(&2u32.to_le_bytes());
+    b.extend_from_slice(&[10u8, 20, 30, 40, 25]);
+    let d = tex::decode_bytes(&b).unwrap();
+    assert_eq!(d.mips.len(), 1);
+    assert_eq!(&d.mips[0].rgba[..], &[25, 25, 25, 255]);
+}
+
+#[test]
+fn ktx2_liefert_deklarierte_stufen() {
+    // Zwei Rohstufen (4×2 und 2×1) mit echten Indexeinträgen.
+    let data: Vec<u8> = (0..40u8).collect(); // 32 Byte Stufe 0 + 8 Byte Stufe 1
+    let mut b = vec![0u8; 80];
+    b[0..12].copy_from_slice(&[0xAB, 0x4B, 0x54, 0x58, 0x20, 0x32, 0x30, 0xBB, 0x0D, 0x0A, 0x1A, 0x0A]);
+    b[12..16].copy_from_slice(&37u32.to_le_bytes());
+    b[16..20].copy_from_slice(&1u32.to_le_bytes());
+    b[20..24].copy_from_slice(&4u32.to_le_bytes());
+    b[24..28].copy_from_slice(&2u32.to_le_bytes());
+    b[36..40].copy_from_slice(&1u32.to_le_bytes());
+    b[40..44].copy_from_slice(&2u32.to_le_bytes()); // levelCount
+    b.extend_from_slice(&128u64.to_le_bytes()); // Stufe 0 @128
+    b.extend_from_slice(&32u64.to_le_bytes());
+    b.extend_from_slice(&32u64.to_le_bytes());
+    b.extend_from_slice(&160u64.to_le_bytes()); // Stufe 1 @160
+    b.extend_from_slice(&8u64.to_le_bytes());
+    b.extend_from_slice(&8u64.to_le_bytes());
+    b.extend_from_slice(&data);
+    let d = tex::decode_bytes(&b).unwrap();
+    assert_eq!(d.rgba, data[..32].to_vec());
+    assert_eq!(d.mips.len(), 1);
+    assert_eq!((d.mips[0].width, d.mips[0].height), (2, 1));
+    assert_eq!(d.mips[0].rgba, data[32..40].to_vec());
+}
+
+#[test]
+fn build_mip_chain_mittelt_2x2() {
+    // 4×4: zwei weiße Zeilen über zwei schwarzen → Stufe 1 halbiert
+    // zeilenweise, Stufe 2 (1×1) mittelt auf 128.
+    let mut rgba = vec![0u8; 4 * 4 * 4];
+    for px in rgba.chunks_exact_mut(4) {
+        px.copy_from_slice(&[0, 0, 0, 255]);
+    }
+    // Erste zwei Zeilen auf Weiß (Alpha bleibt überall 255).
+    for y in 0..2 {
+        for x in 0..4 {
+            let o = (y * 4 + x) * 4;
+            rgba[o] = 255;
+            rgba[o + 1] = 255;
+            rgba[o + 2] = 255;
+        }
+    }
+    let chain = tex::build_mip_chain(&rgba, 4, 4);
+    assert_eq!(chain.len(), 2);
+    assert_eq!((chain[0].width, chain[0].height), (2, 2));
+    // Stufe 1: obere Zeile noch weiß, untere schwarz …
+    assert_eq!(&chain[0].rgba[0..4], &[255, 255, 255, 255]);
+    assert_eq!(&chain[0].rgba[4..8], &[255, 255, 255, 255]);
+    assert_eq!(&chain[0].rgba[8..12], &[0, 0, 0, 255]);
+    assert_eq!(&chain[0].rgba[12..16], &[0, 0, 0, 255]);
+    // … Stufe 2 mittelt zu 128.
+    assert_eq!(&chain[1].rgba[..], &[128, 128, 128, 255]);
+}
+
+#[test]
+fn build_mip_chain_ungerade_kanten() {
+    // 3×3 → 1×1 mit Klemmen: alle Zellen 8 → Durchschnitt 8.
+    let rgba = vec![8u8; 3 * 3 * 4];
+    let chain = tex::build_mip_chain(&rgba, 3, 3);
+    assert_eq!(chain.len(), 1);
+    assert_eq!(&chain[0].rgba[..], &[8, 8, 8, 8]);
+}

@@ -106,7 +106,9 @@ honest state of repair. ✅ done and test-covered · 🟡 partially built ·
       — uncompressed bit-mask formats, BC1–BC5 (DXT1/3/5/ATI1/ATI2)
       and BC7 (own decoder, bit-exact per spec), DX10 header included.
       KTX2 containers decode natively too (uncompressed and BC
-      payloads, bit-identical to DDS).
+      payloads, bit-identical to DDS). Mip chains arrive with the
+      file (DDS/KTX2) or are computed (`build_mip_chain`); re-wgpu
+      uploads the full chain and samples it trilinearly.
       Open standards only; content from other
       engines arrives through their official exporters (UE/Unity export
       FBX/USD/glTF themselves).
@@ -116,9 +118,8 @@ honest state of repair. ✅ done and test-covered · 🟡 partially built ·
       idea until the vendors publish open formats; game code never
       migrates anyway
 - [ ] Texture backlog: Basis transcoding inside KTX2 (ETC1S, UASTC),
-      ETC2/EAC CPU decode (Pi target format), OpenEXR and full mip
-      chains (level 0 only today) — decode-side breadth
-      for the streaming pipeline
+      ETC2/EAC CPU decode (Pi target format) and OpenEXR —
+      decode-side breadth for the streaming pipeline
 
 ## M5 — Render pipeline V2 ⬜
 
