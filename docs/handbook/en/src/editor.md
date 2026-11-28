@@ -93,11 +93,15 @@ addressable too.
 
 ## Where it stands
 
-Today the editor ships a working scene view — a free-fly camera into the
-streaming world, with a headless smoke path for CI — plus the full
-headless data layer above. The on-screen panels (outliner tree, inspector,
-menu bar) are the next step; they mount on `EditorContext` and call these
-same capabilities, so the moment a panel exists it is already scriptable
-by an agent.
+Today the editor ships the scene view — a free-fly camera into the
+streaming world, with a headless smoke path for CI — and a full
+on-screen frontend: a `default` preset with menu bar, toolbar, outliner,
+inspector and console over the docking layout, resizable by grabbing
+splitters and redockable by dragging tabs. Every panel is data-driven
+(ADR-0001) and talks to the engine only through `EditorContext::call`,
+so an agent can do exactly what the mouse can — including the
+inspector's direct value editing: click a number field to type, or drag
+the property name to scrub a value live (hold Shift for fine steps;
+every write still goes through `ecs.entity.set`).
 
 Rustdoc: [`re_editor`](../../rustdoc/re_editor/index.html).

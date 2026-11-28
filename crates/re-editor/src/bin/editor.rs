@@ -245,6 +245,7 @@ impl EditorUi {
         }
         // Panels zuerst, Chrome darüber, Popup zuletzt (Painter-Order).
         self.panels.drag_ended = false;
+        self.panels.scrub = None;
         for pl in &placements {
             if pl.panel == "viewport" {
                 self.viewport = pl.rect;
@@ -284,6 +285,10 @@ impl EditorUi {
         re_editor::panels::draw_toolbar(&mut ui, toolbar, &self.manifest.toolbar, &self.theme, &self.atlas, &self.ctx, &mut self.panels);
         re_editor::panels::draw_status_bar(&mut ui, status, &self.theme, &self.atlas, &self.ctx, &self.panels);
         re_editor::panels::draw_menu_popup(&mut ui, &self.manifest.menu_bar, &self.theme, &self.atlas, menu_bar, &self.ctx, &mut self.panels);
+        // Scrub-Wert als Chip am Zeiger — oberste Ebene, nach allem.
+        if let Some((txt, pt)) = self.panels.scrub.clone() {
+            re_editor::panels::draw_drag_ghost(&mut ui, &self.theme, &self.atlas, &txt, pt);
+        }
         ui.end();
         if let Some(id) = self.panels.tab_pick.take() {
             activate_tab(&mut self.dock, &id);
@@ -604,6 +609,7 @@ mod live {
                         chars: std::mem::take(&mut self.ui_chars),
                         backspace: std::mem::replace(&mut self.ui_backspace, false),
                         enter: std::mem::replace(&mut self.ui_enter, false),
+                        shift: self.held(Key::ShiftLeft) || self.held(Key::ShiftRight),
                     };
                     let dl = self.ui.frame(self.size, &ui_input);
                     if let Err(e) = self.exec.backend.render_with_ui(&camera, &batches, Some((&dl, &self.ui.atlas))) {

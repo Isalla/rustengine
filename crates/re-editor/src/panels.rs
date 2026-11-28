@@ -34,8 +34,10 @@ pub struct PanelState {
     /// Von einem Tab-Knopf angeforderte Aktivierung — die App setzt sie
     /// im Dock-Baum um (`activate_tab`) und leert das Feld.
     pub tab_pick: Option<String>,
-    /// Editier-Puffer des Inspektors: (Entity, Component, Feld, Wert).
-    pub edit: Option<(u32, String, String, String)>,
+    /// Editier-Puffer des Inspektors: "entity/komponente/pfad" → Text.
+    pub edits: std::collections::HashMap<String, String>,
+    /// Läuft gerade ein Wert-Scrubbing: Tooltip-Text + Zeigerpunkt.
+    pub scrub: Option<(String, [f32; 2])>,
     /// Popup-Rechteck des offenen Menüs (für Klick-außerhalb-Test).
     pub popup: Option<Rect>,
     /// Läuft ein Tab-Umlager-Drag (Panel-id)?
@@ -394,7 +396,7 @@ pub fn draw_outliner(
         let r = Rect::new(body.x, body.y + i as f32 * row - off, (body.w - 5.0).max(0.0), row);
         if ui.selectable(&format!("outliner/{e}"), r, &name, st.selected == Some(*e)) {
             st.selected = Some(*e);
-            st.edit = None;
+            st.edits.clear();
             let _ = ctx.call("editor.selection.set", json!({ "ids": [e] }));
         }
     }
@@ -447,43 +449,194 @@ pub fn draw_inspector(
         if comp == "Name" {
             // Editierbares Namensfeld — Commit pro Änderung über die
             // Capability (kein direkter Welt-Zugriff).
-            let key = (e, comp.clone(), "value".to_string());
-            let stale = st.edit.as_ref().map(|x| (x.0, x.1.clone(), x.2.clone())) != Some(key.clone());
-            if stale {
-                let cur = wert.get("value").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                st.edit = Some((key.0, key.1, key.2, cur));
+            let key = format!("{e}/{comp}/value");
+            let cur = wert.get("value").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let buf = st.edits.entry(key).or_insert(cur);
+            let fr = Rect::new(body.x + pad * 2.0, y, (body.w - pad * 4.0).max(40.0), row);
+            if ui.text_field(&format!("insp/{e}/name/value"), fr, buf) {
+                let _ = ctx.call(
+                    "ecs.entity.set",
+                    json!({ "entity": e, "component": "Name", "wert": { "value": buf } }),
+                );
             }
-            if let Some((_, _, _, buf)) = &mut st.edit {
-                let fr = Rect::new(body.x + pad * 2.0, y, (body.w - pad * 4.0).max(40.0), row);
-                if ui.text_field(&format!("insp/{e}/name/value"), fr, buf) {
-                    let _ = ctx.call(
-                        "ecs.entity.set",
-                        json!({ "entity": e, "component": "Name", "wert": { "value": buf } }),
-                    );
-                }
-                y += row + pad * 0.5;
-            }
+            y += row + pad * 0.5;
         } else {
-            // Nicht editierbare Components: JSON-Ausgabe, eine Zeile
-            // pro Schlüssel (gekürzt).
-            match wert {
+            // Zahlenblätter sind direkt editierbar: Klick ins Feld
+            // schreibt Text, Ziehen am Namen scrubbt den Wert (Shift =
+            // feiner). Alles andere erscheint als JSON-Zeile. Geschrieben
+            // wird ausschließlich über `ecs.entity.set`.
+            match &wert {
                 Value::Object(map) => {
+                    let label_w = (body.w * 0.45).max(70.0);
                     for (k, v) in map {
-                        let line = format!("{k}: {}", summarize(&v));
-                        ui.draw.text(atlas, 0, &line, body.x + pad * 2.0, y, line_h, theme.colors.text_dim);
-                        y += line_h + 2.0;
+                        if y > body.bottom() {
+                            break;
+                        }
+                        match v {
+                            Value::Number(n) => {
+                                y = number_row(ui, body, y, label_w, row, pad, e, comp, k, &Value::Number(n.clone()), &wert, ctx, st);
+                            }
+                            Value::Array(a) if !a.is_empty() && a.iter().all(Value::is_number) => {
+                                for (i, n) in a.iter().enumerate() {
+                                    let path = format!("{k}[{i}]");
+                                    y = number_row(ui, body, y, label_w, row, pad, e, comp, &path, n, &wert, ctx, st);
+                                }
+                            }
+                            other => {
+                                let line = format!("{k}: {}", summarize(other));
+                                ui.draw.text(atlas, 0, &line, body.x + pad * 2.0, y, line_h, theme.colors.text_dim);
+                                y += line_h + 2.0;
+                            }
+                        }
                     }
+                    y += pad * 0.5;
+                }
+                Value::Number(n) => {
+                    let label_w = (body.w * 0.45).max(70.0);
+                    y = number_row(ui, body, y, label_w, row, pad, e, comp, "value", &Value::Number(n.clone()), &wert, ctx, st);
+                    y += pad * 0.5;
                 }
                 other => {
-                    let line = summarize(&other);
+                    let line = summarize(other);
                     ui.draw.text(atlas, 0, &line, body.x + pad * 2.0, y, line_h, theme.colors.text_dim);
                     y += line_h + 2.0;
+                    y += pad * 0.5;
                 }
             }
-            y += pad * 0.5;
         }
     }
     ui.draw.pop_clip();
+}
+
+/// Eine editierbare Zahlenzeile: Name links (Zieh-Fläche), Eingabefeld
+/// rechts. Gibt die neue y-Position zurück.
+#[allow(clippy::too_many_arguments)]
+fn number_row(
+    ui: &mut Ui,
+    body: Rect,
+    y: f32,
+    label_w: f32,
+    row: f32,
+    pad: f32,
+    e: u32,
+    comp: &str,
+    path: &str,
+    leaf: &Value,
+    wert: &Value,
+    ctx: &EditorContext,
+    st: &mut PanelState,
+) -> f32 {
+    let is_int = leaf.is_i64() || leaf.is_u64();
+    let step = if is_int { 0.05 } else { scrub_step(comp, path) };
+    let lr = Rect::new(body.x + 4.0, y, (label_w - 6.0).max(30.0), row);
+    let s = ui.scrub(&format!("scrub/{e}/{comp}/{path}"), lr, step);
+    let key = format!("{e}/{comp}/{path}");
+    if !st.edits.contains_key(&key) {
+        st.edits.insert(key.clone(), leaf_text(leaf));
+    }
+    let mut buf = st.edits.get(&key).cloned().unwrap_or_default();
+    let mut touched = false;
+    if s.dragging || s.ended {
+        let base = buf.trim().parse::<f64>().unwrap_or_else(|_| leaf.as_f64().unwrap_or(0.0));
+        buf = fmt_leaf(is_int, base + f64::from(s.delta));
+        touched = true;
+    }
+    if s.dragging {
+        if let Some(p) = ui.pointer() {
+            st.scrub = Some((buf.clone(), p));
+        }
+    } else if s.ended {
+        st.scrub = None;
+    }
+    let fr = Rect::new(lr.right() + 2.0, y, (body.right() - pad - lr.right()).max(40.0), row);
+    if ui.text_field(&format!("insp/{e}/{comp}/{path}"), fr, &mut buf) {
+        touched = true;
+    }
+    if touched && buf.trim().parse::<f64>().is_ok() {
+        let _ = ctx.call(
+            "ecs.entity.set",
+            json!({ "entity": e, "component": comp, "wert": patched_value(wert, path, &buf, is_int) }),
+        );
+    }
+    st.edits.insert(key, buf);
+    y + row + 2.0
+}
+
+/// Scrub-Tempo je Eigenschaftsfamilie (Welt-Einheiten pro Pixel).
+fn scrub_step(comp: &str, path: &str) -> f32 {
+    if comp == "Transform" {
+        if path.starts_with("rotation") {
+            0.25
+        } else {
+            0.01
+        }
+    } else {
+        0.01
+    }
+}
+
+/// Anzeigetext eines Zahlenblatts („9" statt „9.0").
+fn leaf_text(v: &Value) -> String {
+    if v.is_i64() || v.is_u64() {
+        v.as_i64().map(|i| i.to_string()).unwrap_or_default()
+    } else {
+        fmt_num(v.as_f64().unwrap_or(0.0))
+    }
+}
+
+/// Kürzeste lesbare Darstellung: ganze Zahlen ohne Nachkomma-Null,
+/// auf f32 gerundet (die Welt speichert float32 — kein „1.2000000476").
+fn fmt_num(v: f64) -> String {
+    let f = v as f32;
+    if f.abs() < 1e15 && (f as f64 - f.round() as f64).abs() < 1e-9 {
+        (f.round() as i64).to_string()
+    } else {
+        f.to_string()
+    }
+}
+
+fn fmt_leaf(is_int: bool, v: f64) -> String {
+    if is_int {
+        (v.round() as i64).to_string()
+    } else {
+        fmt_num(v)
+    }
+}
+
+/// Zerlegt „translation[1]" in („translation", Some(1)) bzw. „k" in („k", None).
+fn split_leaf(path: &str) -> (&str, Option<usize>) {
+    if let Some(rest) = path.strip_suffix(']') {
+        if let Some(b) = rest.rfind('[') {
+            if let Ok(i) = rest[b + 1..].parse() {
+                return (&rest[..b], Some(i));
+            }
+        }
+    }
+    (path, None)
+}
+
+/// Setzt ein gescrubbeltes oder getipptes Zahlenblatt in eine Kopie des
+/// Component-JSON — so bleibt `ecs.entity.set` der einzige Schreibweg.
+fn patched_value(wert: &Value, path: &str, text: &str, is_int: bool) -> Value {
+    let n: f64 = text.trim().parse().unwrap_or(0.0);
+    let leaf = if is_int { json!(n.round() as i64) } else { json!(n) };
+    let (k, idx) = split_leaf(path);
+    let mut out = wert.clone();
+    match (&mut out, idx) {
+        (Value::Object(o), None) => {
+            o.insert(k.to_string(), leaf);
+        }
+        (Value::Object(o), Some(i)) => {
+            if let Some(a) = o.get_mut(k).and_then(Value::as_array_mut) {
+                if i < a.len() {
+                    a[i] = leaf;
+                }
+            }
+        }
+        (Value::Number(_), _) => out = leaf,
+        _ => {}
+    }
+    out
 }
 
 /// Konsole: Log-Puffer + Kommandozeile. Enter (über `input.enter`)
@@ -651,6 +804,7 @@ mod tests {
             chars: String::new(),
             backspace: false,
             enter: false,
+            shift: false,
         }
     }
 
@@ -723,5 +877,59 @@ mod tests {
         let hit = drop_target_at(&zones, [300.0, 150.0]).expect("Flächenmitte");
         assert_eq!(hit.2, DockEdge::Center);
         assert!(drop_target_at(&zones, [10.0, 10.0]).is_none(), "außerhalb ist kein Ziel");
+    }
+
+    #[test]
+    fn patched_value_setzt_blatt_und_laesst_rest() {
+        let wert = json!({ "translation": [1.0, 2.0, 3.0], "rotation": [0.0, 0.0, 0.0, 1.0] });
+        let p = patched_value(&wert, "translation[1]", "2.5", false);
+        assert_eq!(p["translation"][1], json!(2.5));
+        assert_eq!(p["translation"][2], json!(3.0), "Nachbarn bleiben");
+        assert_eq!(p["rotation"][3], json!(1.0), "andere Schlüssel bleiben");
+        let i = patched_value(&json!({ "energie": 40 }), "energie", "40.7", true);
+        assert_eq!(i["energie"], json!(41), "integer-Blatt rundet");
+    }
+
+    /// Transform-Header aufklappen, dann das erste Zahlenblatt am Namen
+    /// scrubben — die Welt muss sich über die Capability geändert haben.
+    #[test]
+    fn inspektor_scrubbt_zahlenblatt_ueber_capability() {
+        use re_core::transform::Transform;
+        let ctx = EditorContext::new(Vec3::ZERO);
+        let id = {
+            let mut w = ctx.world.lock().unwrap();
+            let ent = w.spawn();
+            w.insert(ent, Transform { translation: [1.0, 0.0, 0.0], ..Default::default() });
+            ent.index()
+        };
+        let vorher = ctx.call("ecs.entity.get", json!({ "entity": id, "component": "Transform" })).unwrap()["wert"].clone();
+
+        let a = atlas();
+        let t = Theme::default();
+        let row = t.metrics.row_h;
+        let pad = t.metrics.pad;
+        let pl = PanelPlacement { panel: "inspector".into(), rect: Rect::new(0.0, 0.0, 300.0, 400.0), tabs: vec![] };
+        let mut st = UiState::default();
+        let mut pst = PanelState { selected: Some(id), ..Default::default() };
+        // body = unten am Titelstreifen; erste Wertzeile sitzt eine
+        // Kopfzeile unter body-Anfang.
+        let first_leaf_y = row + pad * 0.5 + row + row * 0.5; // Mitte der ersten Blattzeile
+        let mut frame = |pointer: Option<[f32; 2]>, pressed: bool, released: bool, st: &mut UiState, pst: &mut PanelState| {
+            let i = UiInput { pointer, pressed, released, ..Default::default() };
+            let mut ui = Ui::new(Rect::new(0.0, 0.0, 300.0, 400.0), &t, &a, None, st, &i);
+            draw_inspector(&mut ui, &pl, &t, &a, &ctx, pst);
+            ui.end();
+        };
+        // Komponenten-Header sind offen per Vorgabe — direkt ans Blatt.
+        // Ziehen am Namen des ersten Zahlenblatts: 30 px nach rechts.
+        frame(Some([40.0, first_leaf_y]), true, false, &mut st, &mut pst);
+        frame(Some([60.0, first_leaf_y]), false, false, &mut st, &mut pst);
+        frame(Some([70.0, first_leaf_y]), false, false, &mut st, &mut pst);
+        assert!(pst.scrub.is_some(), "Scrub-Chip hängt am Zeiger");
+        frame(Some([70.0, first_leaf_y]), false, true, &mut st, &mut pst);
+
+        let nachher = ctx.call("ecs.entity.get", json!({ "entity": id, "component": "Transform" })).unwrap()["wert"].clone();
+        assert_ne!(vorher, nachher, "Scrubben muss die Welt über die Capability ändern");
+        assert!(pst.scrub.is_none(), "nach dem Loslass kein Chip mehr");
     }
 }

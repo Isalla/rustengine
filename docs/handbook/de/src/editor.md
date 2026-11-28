@@ -93,11 +93,15 @@ Speichern/Laden als Roundtrip adressierbar ist.
 
 ## Stand
 
-Heute liefert der Editor eine lauffähige Szenen-Ansicht — eine frei
-fliegende Kamera in die streamende Welt, mit Headless-Smoke-Pfad für CI —
-plus die komplette kopflose Datenschicht oben. Die sichtbaren Panels
-(Outliner-Baum, Inspector, Menüleiste) sind der nächste Schritt; sie
-setzen auf `EditorContext` auf und rufen genau diese Capabilities. Sobald
-ein Panel existiert, ist es damit auch schon von der Agentin steuerbar.
+Heute liefert der Editor die Szenen-Ansicht — eine frei fliegende Kamera
+in die streamende Welt, mit Headless-Smoke-Pfad für CI — und ein
+vollständiges Bildschirm-Frontend: ein `default`-Preset mit Menüleiste,
+Werkzeugleiste, Outliner, Inspektor und Konsole über dem Docking-Layout,
+das sich an gegriffenen Splittern umskalieren und per Tab-Ziehen umlagern
+lässt. Alle Panels sind datengetrieben (ADR-0001) sprechen die Engine nur
+über `EditorContext::call` an, sodass die Agentin genau das kann, was die
+Maus kann — bis hin zu den direkt editierbaren Werten im Inspektor:
+Zahlenfeld klicken und tippen, oder am Eigenschaftsnamen scrubben (mit
+Shift feiner); geschrieben wird dabei immer über `ecs.entity.set`.
 
 Rustdoc: [`re_editor`](../../rustdoc/re_editor/index.html).

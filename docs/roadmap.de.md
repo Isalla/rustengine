@@ -97,6 +97,11 @@ mit ehrlichem Haken-Stand. ✅ fertig und testabgedeckt · 🟡 teilweise gebaut
       umlagern — `dock_splitters`/`dock_set_ratio`/`dock_take`/
       `dock_put` in `re-render::ui`, `drop_zones` + Drag-Geist in
       `re-editor::panels`; OS-eigene Schwebefenster zurückgestellt)
+- [x] Direkt editierbare Werte im Inspektor (Zahlenfeld klicken und
+      tippen, am Eigenschaftsnamen scrubben — Shift für feine Schritte;
+      `Ui::drag`/`Ui::scrub` in `re-render::ui`, editierbare
+      Zahlenblätter in `re-editor::panels`; jeder Schreibzug bleibt auf
+      dem `ecs.entity.set`-Capability-Weg)
 - [ ] Mehr Dateiformate (Breite statt Einzel-Tool-Migration):
       registrgesteuerte Importierer/Exportierer — FBX (Meshes &
       Animationen), OBJ-Legat und USD (Szenen-Austausch) zusätzlich zum

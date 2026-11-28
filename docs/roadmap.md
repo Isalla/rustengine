@@ -94,6 +94,11 @@ honest state of repair. ✅ done and test-covered · 🟡 partially built ·
       `dock_splitters`/`dock_set_ratio`/`dock_take`/`dock_put` in
       `re-render::ui`, `drop_zones` + drag ghost in `re-editor::panels`;
       OS-level floating windows deferred)
+- [x] Direct value editing in the inspector (click a number field to
+      type, drag the property name to scrub — Shift for fine steps;
+      `Ui::drag`/`Ui::scrub` in `re-render::ui`, editable number leaves
+      in `re-editor::panels`; every write stays on the
+      `ecs.entity.set` capability path)
 - [ ] More file formats (breadth over single-tool migration):
       registry-driven importers/exporters — FBX (meshes & animation),
       OBJ legacy and USD (scene interchange) on top of the existing

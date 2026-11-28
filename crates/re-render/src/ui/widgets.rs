@@ -32,6 +32,23 @@ pub fn snap(r: Rect) -> Rect {
     Rect::new(x, y, (right - x).max(0.0), (bottom - y).max(0.0))
 }
 
+/// Ergebnis eines Wert-Scrubbing-Vorgangs (`Ui::scrub`).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Scrub {
+    /// Griff hält gerade und hat die Schwelle überschritten.
+    pub dragging: bool,
+    /// Feuert genau einmal im Loslass-Frame nach echtem Scrubben.
+    pub ended: bool,
+    /// Wertänderung dieses Frames (Zeigerweg mal Schrittweite).
+    pub delta: f32,
+}
+
+/// Weg in Pixeln, bevor ein Scrub-Griff statt eines Klicks greift.
+pub const SCRUB_THRESHOLD_PX: f32 = 4.0;
+
+/// Tempo-Faktor bei gedrückter Shift-Taste (feine Justage).
+pub const SCRUB_SHIFT_SPEED: f32 = 0.1;
+
 /// Ergebnis eines Mausgriffs (`Ui::drag`).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct DragInfo {
@@ -41,6 +58,9 @@ pub struct DragInfo {
     pub moved: bool,
     /// Feuert genau einmal im Loslass-Frame.
     pub ended: bool,
+    /// Zeiger-Weg dieses Frames in x/y (0 im Claim-Frame).
+    pub dx: f32,
+    pub dy: f32,
 }
 
 /// Eingabe-Lage eines Frames. Der Editor mappt Plattform-Events
@@ -49,6 +69,8 @@ pub struct DragInfo {
 pub struct UiInput {
     /// Zeigerposition in Fenster-Pixeln; `None` = außerhalb.
     pub pointer: Option<[f32; 2]>,
+    /// Hält der Nutzer gerade Shift (Scrubbing wird feiner)?
+    pub shift: bool,
     /// Linke Maustaste in diesem Frame gedrückt worden.
     pub pressed: bool,
     /// Linke Maustaste in diesem Frame losgelassen worden.
@@ -70,6 +92,12 @@ pub struct UiState {
     open: BTreeMap<u64, bool>,
     /// Druckpunkt des laufenden Zieh-Vorgangs (für Weg-Strecke).
     drag_origin: Option<[f32; 2]>,
+    /// Zeigerpunkt des letzten Frames im laufenden Zieh-Vorgang
+    /// (für Frame-zu-Frame-Delta).
+    drag_last: Option<[f32; 2]>,
+    /// Rechteck des fokusierten Eingabefelds — Griffe außerhalb
+    /// dürfen es entlassen, Griffe innerhalb nicht.
+    focus_rect: Option<Rect>,
 }
 
 impl UiState {
@@ -160,6 +188,7 @@ impl<'a> Ui<'a> {
         if self.input.released {
             self.state.active = None;
             self.state.drag_origin = None;
+            self.state.drag_last = None;
         }
     }
 
@@ -214,6 +243,11 @@ impl<'a> Ui<'a> {
         self.input.pointer
     }
 
+    /// Der geteilte UI-Zustand (Fokus, aktive Halterung …) zum Prüfen.
+    pub fn state(&self) -> &UiState {
+        self.state
+    }
+
     /// Hält diese ID gerade die Maus (laufender Klick- oder Zieh-Vorgang)?
     pub fn is_held(&self, id: &str) -> bool {
         self.state.active == Some(hash_id(id))
@@ -223,27 +257,69 @@ impl<'a> Ui<'a> {
     /// `moved` meldet zurückgelegte Wege ab `min_px` (Manhattan-Distanz)
     /// — dasselbe Rechteck kann so Klick-Ziel UND Zieh-Griff sein.
     /// `ended` feuert genau einmal im Loslass-Frame (Zeiger egal wo);
-    /// `ui.end()` gibt die Taste danach frei.
+    /// `dx`/`dy` sind die Zeiger-Deltas des Frames (0 im Claim-Frame).
+    ///
+    /// Anders als `Ui::interact` lässt der Griff ein normales
+    /// Eingabefeld gelten: ein Druck außerhalb des fokussierten Feldes
+    /// entlässt es und greift trotzdem.
     pub fn drag(&mut self, id: &str, grab: Rect, min_px: f32) -> DragInfo {
         let hid = hash_id(id);
         let p = self.input.pointer;
         if self.state.active == Some(hid) {
-            let dist = self
+            let total = self
                 .state
                 .drag_origin
                 .and_then(|o| p.map(|c| (c[0] - o[0]).abs() + (c[1] - o[1]).abs()))
                 .unwrap_or(0.0);
-            DragInfo { claimed: true, moved: dist >= min_px.max(0.0), ended: self.input.released }
+            let (dx, dy) = match (self.state.drag_last, p) {
+                (Some(a), Some(b)) => (b[0] - a[0], b[1] - a[1]),
+                _ => (0.0, 0.0),
+            };
+            self.state.drag_last = p;
+            DragInfo {
+                claimed: true,
+                moved: total >= min_px.max(0.0),
+                ended: self.input.released,
+                dx,
+                dy,
+            }
         } else {
             let under = p.is_some_and(|c| grab.contains(c[0], c[1]));
-            let claim = under && self.input.pressed && self.state.active.is_none() && self.state.focus.is_none();
+            let claim = under && self.input.pressed && self.state.active.is_none();
             if claim {
+                if self.state.focus.is_some()
+                    && !self.state.focus_rect.is_some_and(|r| p.is_some_and(|c| r.contains(c[0], c[1])))
+                {
+                    self.state.focus = None;
+                    self.state.focus_rect = None;
+                }
                 self.state.active = Some(hid);
                 self.state.drag_origin = p;
-                DragInfo { claimed: true, moved: min_px <= 0.0, ended: self.input.released }
+                self.state.drag_last = p;
+                DragInfo { claimed: true, moved: min_px <= 0.0, ended: self.input.released, dx: 0.0, dy: 0.0 }
             } else {
                 DragInfo::default()
             }
+        }
+    }
+
+    /// WertScrubbing: Ziehen an `grab` ändert einen Zahlenwert.
+    ///
+    /// Erst ab `SCRUB_THRESHOLD_PX` Weg wird geschrubbt, damit ein
+    /// normales Klicken (etwa zum Editieren) nicht verbiegt. `delta`
+    /// ist die Wertänderung dieses Frames (Zeigerweg in Pixeln mal
+    /// `step_per_px`); mit gedrückter Shift-Taste läuft es auf einem
+    /// Zehntel Tempo für feine Justage.
+    pub fn scrub(&mut self, id: &str, grab: Rect, step_per_px: f32) -> Scrub {
+        let d = self.drag(id, grab, SCRUB_THRESHOLD_PX);
+        if !d.claimed || !d.moved {
+            return Scrub::default();
+        }
+        let speed = if self.input.shift { SCRUB_SHIFT_SPEED } else { 1.0 };
+        Scrub {
+            dragging: !d.ended,
+            ended: d.ended,
+            delta: (d.dx + d.dy) * step_per_px * speed,
         }
     }
 
@@ -512,10 +588,15 @@ impl<'a> Ui<'a> {
         let under = self.input.pointer.is_some_and(|p| r.contains(p[0], p[1]));
         if under && self.input.pressed {
             self.state.focus = Some(hid);
+            self.state.focus_rect = Some(r);
         } else if self.input.pressed && self.state.focus == Some(hid) {
             self.state.focus = None;
+            self.state.focus_rect = None;
         }
         let focused = self.state.focus == Some(hid);
+        if focused {
+            self.state.focus_rect = Some(r);
+        }
         let mut edited = false;
         if focused {
             if self.input.backspace && !value.is_empty() {
@@ -530,6 +611,7 @@ impl<'a> Ui<'a> {
             }
             if self.input.enter {
                 self.state.focus = None;
+                self.state.focus_rect = None;
             }
         }
         let th = self.theme;
@@ -603,8 +685,7 @@ mod tests {
     }
 
     #[test]
-    fn button_klickt_erst_beim_release_innerhalb() {
-        let a = atlas();
+    fn button_klickt_erst_beim_release_innerhalb() {        let a = atlas();
         let t = Theme::default();
         let mut st = UiState::default();
         let r = Rect::new(0.0, 0.0, 50.0, 20.0);
@@ -922,6 +1003,64 @@ mod tests {
         if let Ok(p) = std::env::var("RE_WIDGETS_PNG") {
             use image::RgbaImage;
             RgbaImage::from_raw(w, h, bild).expect("puffer").save(&p).expect("png");
+        }
+    }
+
+    #[test]
+    fn scrubbt_erst_ab_der_schwelle_zaehlt_deltas() {
+        let a = atlas();
+        let t = Theme::default();
+        let mut st = UiState::default();
+        let grab = Rect::new(4.0, 4.0, 100.0, 24.0);
+        let mut scrub_frame = |pointer: Option<[f32; 2]>, pressed: bool, released: bool, shift: bool, st: &mut UiState| {
+            let i = UiInput { pointer, pressed, released, shift, ..Default::default() };
+            let mut ui = Ui::new(area(), &t, &a, None, st, &i);
+            let s = ui.scrub("wert", grab, 0.1);
+            ui.end();
+            s
+        };
+        let s = scrub_frame(Some([10.0, 10.0]), true, false, false, &mut st);
+        assert!(!s.dragging && s.delta == 0.0, "Press allein scrubbt nicht");
+        let s = scrub_frame(Some([12.0, 10.0]), false, false, false, &mut st);
+        assert!(!s.dragging && s.delta == 0.0, "2 px unter der Schwelle");
+        let s = scrub_frame(Some([16.0, 10.0]), false, false, false, &mut st);
+        assert!(s.dragging, "ab 4 px Weg wird geschrubbt");
+        assert!((s.delta - 0.4).abs() < 1e-6, "4 px x 0.1 = 0.4, war {}", s.delta);
+        let s = scrub_frame(Some([16.0, 10.0]), false, true, false, &mut st);
+        assert!(s.ended && !s.dragging && s.delta == 0.0, "Loslass-Frame ohne Bewegung meldet ende");
+        // Neuer Griff, diesmal mit Shift: ein Zehntel Tempo.
+        scrub_frame(Some([10.0, 10.0]), true, false, true, &mut st);
+        let s = scrub_frame(Some([20.0, 10.0]), false, false, true, &mut st);
+        assert!(s.dragging && (s.delta - 0.1).abs() < 1e-6, "shift verfeinert, war {}", s.delta);
+    }
+
+    #[test]
+    fn scrub_drueckgabe_entlaesst_fokus_ausserhalb() {
+        let a = atlas();
+        let t = Theme::default();
+        let mut st = UiState::default();
+        let feld = Rect::new(6.0, 40.0, 120.0, 24.0);
+        let griff = Rect::new(6.0, 8.0, 120.0, 24.0);
+        {
+            let i = inp(Some([10.0, 50.0]), true, false);
+            let mut ui = Ui::new(area(), &t, &a, None, &mut st, &i);
+            let mut text = String::from("1");
+            ui.text_field("feld", feld, &mut text);
+            ui.end();
+        }
+        assert!(st.has_focus(), "Feld hat Fokus");
+        {
+            // Druck auf den Zieh-Namen außerhalb des Feldes: der Griff
+            // greift und entlässt das Eingabefeld.
+            let i = inp(Some([10.0, 16.0]), true, false);
+            let mut ui = Ui::new(area(), &t, &a, None, &mut st, &i);
+            let mut text = String::from("1");
+            ui.text_field("feld", feld, &mut text);
+            let s = ui.scrub("wert", griff, 0.1);
+            ui.end();
+            assert!(ui.is_held("wert"), "Zieh-Fläche hält trotz Feld-Fokus");
+            assert!(!ui.state().has_focus(), "Feld verliert den Fokus");
+            assert!(!s.dragging, "ohne Weg wird nicht geschrubbt");
         }
     }
 }
