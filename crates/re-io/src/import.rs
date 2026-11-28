@@ -19,7 +19,7 @@ use re_core::scene::{Node as WNode, NodeKind};
 use re_core::skeleton::Skeleton;
 use re_core::transform::Transform;
 
-pub fn import(path: &Path) -> Result<Project> {
+pub(crate) fn import_gltf(path: &Path) -> Result<Project> {
     let (document, buffers, _images) = gltf::import(path)
         .with_context(|| format!("open {}", path.display()))?;
     let blob = |buffer: gltf::Buffer| buffers.get(buffer.index()).map(|b| &b.0[..]);

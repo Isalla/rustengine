@@ -13,6 +13,7 @@ window = ["dep:winit", "dep:re-platform"]
 
 [dependencies]
 re-core.workspace = true
+re-io.workspace = true
 re-render.workspace = true
 re-world.workspace = true
 anyhow.workspace = true

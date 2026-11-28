@@ -99,12 +99,16 @@ honest state of repair. ✅ done and test-covered · 🟡 partially built ·
       `Ui::drag`/`Ui::scrub` in `re-render::ui`, editable number leaves
       in `re-editor::panels`; every write stays on the
       `ecs.entity.set` capability path)
-- [ ] More file formats (breadth over single-tool migration):
-      registry-driven importers/exporters — FBX (meshes & animation),
-      OBJ legacy and USD (scene interchange) on top of the existing
-      glTF path. Open standards only; content from other engines
-      arrives through their official exporters (UE/Unity export
-      FBX/USD/glTF themselves). Proprietary scene formats
+- [x] More file formats (breadth over single-tool migration):
+      OBJ (+MTL) reader/writer on top of the existing glTF path,
+      extension dispatch in `re_io::import/export`; unified texture
+      loading (`re_io::tex`) for PNG/JPEG/TGA/BMP/QOI plus native DDS
+      — uncompressed bit-mask formats and BC1–BC5 (DXT1/3/5/ATI1/ATI2),
+      DX10 header included. Open standards only; content from other
+      engines arrives through their official exporters (UE/Unity export
+      FBX/USD/glTF themselves).
+- [ ] Format backlog: USD (ASCII subset) and FBX (meshes & animation)
+      as further importers. Proprietary scene formats
       (`.uasset`/`.umap`, `.unity`) stay unsupported — parked as an
       idea until the vendors publish open formats; game code never
       migrates anyway

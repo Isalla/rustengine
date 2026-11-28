@@ -97,6 +97,7 @@ mod tests {
             "project.save",
             "project.info",
             "import.gltf",
+            "import.obj",
             "import.preview",
             "ecs.entities",
             "ecs.entity.components",

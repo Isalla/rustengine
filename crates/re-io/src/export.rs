@@ -76,7 +76,7 @@ fn mk_accessor(
     }
 }
 
-pub fn export(p: &Project, path: &Path) -> Result<()> {
+pub(crate) fn export_gltf(p: &Project, path: &Path) -> Result<()> {
     let ext = path
         .extension()
         .and_then(|e| e.to_str())

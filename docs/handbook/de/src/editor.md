@@ -84,12 +84,13 @@ reg.register::<re_core::transform::Transform>("Transform");
 
 ## Import und Projektdateien
 
-`re_editor::import` kapselt den glTF/GLB-Leser aus `re_io` hinter zwei
+`re_editor::import` kapselt die Modell-Leser aus `re_io` (glTF/GLB,
+OBJ mit MTL-Material — die Endung entscheidet) hinter drei
 Werkzeugen: `import.preview` meldet Zähler für Meshes/Materialien/Knoten/
-Animationen, ohne das offene Dokument anzufassen; `import.gltf` lädt die
-Datei als aktuelles Projekt und markiert es dirty. `re_editor::project`
-hält das Dokument (`ProjectDoc`) mit Pfad und Dirty-Flag, damit auch
-Speichern/Laden als Roundtrip adressierbar ist.
+Animationen, ohne das offene Dokument anzufassen; `import.gltf` und
+`import.obj` laden die Datei als aktuelles Projekt und markieren es
+dirty. `re_editor::project` hält das Dokument (`ProjectDoc`) mit Pfad
+und Dirty-Flag, damit auch Speichern/Laden als Roundtrip adressierbar ist.
 
 ## Stand
 

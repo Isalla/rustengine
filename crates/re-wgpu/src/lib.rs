@@ -1001,25 +1001,24 @@ impl Inner {
         if let Some((_, v)) = self.tex_cache.get(path) {
             return Some(v.clone());
         }
-        // Decompression-bomb guard: read only the header first and refuse
-        // absurd sizes before decode allocates (Pi RAM is precious).
-        let (dw, dh) = image::ImageReader::open(path)
-            .ok()?
-            .with_guessed_format()
-            .ok()?
-            .into_dimensions()
-            .ok()?;
-        if dw > 8192 || dh > 8192 {
-            return None;
+        // Dekodierung zentral in re-io (PNG/JPEG/TGA/BMP/QOI + natives
+        // DDS). Der Größenwächter bleibt: erst Kopf prüfen, dann
+        // decodieren — die Pi-RAM ist kniffelig. Für DDS misst re-io
+        // selbst (16k-Grenze), `image` kennt das Format nicht.
+        let is_dds = path.rsplit('.').next().is_some_and(|e| e.eq_ignore_ascii_case("dds"));
+        if !is_dds {
+            let (dw, dh) = image::ImageReader::open(path)
+                .ok()?
+                .with_guessed_format()
+                .ok()?
+                .into_dimensions()
+                .ok()?;
+            if dw > 8192 || dh > 8192 {
+                return None;
+            }
         }
-        let img = image::ImageReader::open(path)
-            .ok()?
-            .with_guessed_format()
-            .ok()?
-            .decode()
-            .ok()?
-            .to_rgba8();
-        let (w, h) = img.dimensions();
+        let img = re_io::tex::decode(std::path::Path::new(path)).ok()?;
+        let (w, h) = (img.width, img.height);
         let tex = self.device.create_texture(&wgpu::TextureDescriptor {
             label: Some("albedo"),
             size: wgpu::Extent3d {
@@ -1041,7 +1040,7 @@ impl Inner {
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
             },
-            img.as_raw(),
+            &img.rgba,
             wgpu::TexelCopyBufferLayout {
                 offset: 0,
                 bytes_per_row: Some(w * 4),

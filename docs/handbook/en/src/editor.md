@@ -84,11 +84,12 @@ reg.register::<re_core::transform::Transform>("Transform");
 
 ## Import and project files
 
-`re_editor::import` wraps `re_io`'s glTF/GLB reader behind two tools:
+`re_editor::import` wraps `re_io`'s model readers (glTF/GLB, OBJ with
+MTL materials — the extension picks the format) behind three tools:
 `import.preview` reports mesh/material/node/animation counts without
-touching the open document; `import.gltf` loads the file as the current
-project and marks it dirty. `re_editor::project` keeps the document
-(`ProjectDoc`) with its path and dirty flag, so save/load round-trips are
+touching the open document; `import.gltf` and `import.obj` load the
+file as the current project and mark it dirty. `re_editor::project`
+keeps the document (`ProjectDoc`) with its path and dirty flag, so save/load round-trips are
 addressable too.
 
 ## Where it stands
